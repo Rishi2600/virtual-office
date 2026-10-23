@@ -1,18 +1,28 @@
 {
-  "name": "prisma-test",
-  "version": "1.0.0",
-  "main": "index.js",
+  "name": "virtual-office",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "shared",
+    "server",
+    "client"
+  ],
   "scripts": {
-    "dev": " npx tsc -b && node dist/index.js"
+    "dev": "npm run build:shared && concurrently -n shared,server,client -c gray,cyan,magenta \"npm -w @vo/shared run dev\" \"npm -w @vo/server run dev\" \"npm -w @vo/client run dev\"",
+    "build": "npm -w @vo/shared run build && npm -w @vo/server run build && npm -w @vo/client run build",
+    "build:shared": "npm -w @vo/shared run build",
+    "start": "npm -w @vo/server run start",
+    "test": "npm -w @vo/server run test",
+    "typecheck": "tsc -p server/tsconfig.json --noEmit && tsc -p client/tsconfig.json --noEmit",
+    "smoke": "npm run build:shared && node --experimental-strip-types server/src/smoke/colyseus-compat.ts",
+    "gen:tileset": "node scripts/gen-tileset.mjs"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "description": "",
   "devDependencies": {
-    "typescript": "^5.7.2"
+    "concurrently": "^9.1.2",
+    "typescript": "^5.7.3"
   },
-  "dependencies": {
-    "prisma": "^6.0.1"
+  "engines": {
+    "node": ">=20"
   }
 }

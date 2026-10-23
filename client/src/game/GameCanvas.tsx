@@ -1,0 +1,97 @@
+import { useEffect, useRef } from "react";
+import Phaser from "phaser";
+import { OfficeScene } from "./OfficeScene.js";
+import { roomRef } from "../net/session.js";
+
+/**
+ * The Phaser game is created ONCE for the page, and only once its host element
+ * actually has a size.
+ *
+ * Two failure modes are being avoided here, both of which present identically as
+ * a black screen plus "Framebuffer status: Incomplete Attachment":
+ *
+ *  1. Booting into a 0x0 parent. Scale.RESIZE immediately sizes the canvas to
+ *     the parent, so a parent that has not been laid out yet produces a
+ *     zero-width framebuffer; the renderer then fails and the game loop never
+ *     starts, leaving the scene stuck in the pending queue forever.
+ *  2. Rebuilding the game on every remount. Browsers cap live WebGL contexts,
+ *     and React StrictMode's double-mount plus HMR burns through them quickly.
+ *
+ * The scene reads the room through a stable module-level ref, so it survives
+ * reconnects and remounts without ever needing a new context.
+ */
+const GAME_KEY = "__vo_phaser_game__";
+
+interface GameWindow extends Window {
+  [GAME_KEY]?: Phaser.Game | null;
+}
+
+const getGame = (): Phaser.Game | null => (window as GameWindow)[GAME_KEY] ?? null;
+const setGame = (game: Phaser.Game | null): void => {
+  (window as GameWindow)[GAME_KEY] = game;
+};
+
+function createGame(el: HTMLElement, width: number, height: number): Phaser.Game {
+  const game = new Phaser.Game({
+    type: Phaser.AUTO,
+    parent: el,
+    backgroundColor: "#1c1f26",
+    pixelArt: true,
+    width,
+    height,
+    scale: { mode: Phaser.Scale.RESIZE, autoCenter: Phaser.Scale.CENTER_BOTH },
+    scene: [],
+  });
+  // Added manually (rather than via `scene: [OfficeScene]`) so the room ref can
+  // be handed to the scene as init data.
+  game.scene.add("office", OfficeScene, true, { roomRef });
+  return game;
+}
+
+export function GameCanvas() {
+  const host = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const el = host.current;
+    if (!el) return;
+
+    const sync = () => {
+      const width = el.clientWidth;
+      const height = el.clientHeight;
+      if (!width || !height) return; // not laid out yet — wait for the observer
+
+      const existing = getGame();
+      if (!existing) {
+        const game = createGame(el, width, height);
+        setGame(game);
+        if (import.meta.env.DEV) (window as unknown as { __game?: Phaser.Game }).__game = game;
+        return;
+      }
+
+      // Remount: adopt the existing canvas rather than rebuilding the renderer.
+      if (existing.canvas && existing.canvas.parentElement !== el) el.appendChild(existing.canvas);
+      existing.scale.resize(width, height);
+    };
+
+    sync();
+    const observer = new ResizeObserver(sync);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  return <div className="game-host" ref={host} />;
+}
+
+// Without this, editing this module during dev strands the old game and leaks
+// another WebGL context.
+if (import.meta.hot) {
+  import.meta.hot.dispose(() => {
+    const game = getGame();
+    setGame(null);
+    try {
+      game?.destroy(true);
+    } catch {
+      /* nothing to do */
+    }
+  });
+}

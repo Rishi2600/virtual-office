@@ -1,0 +1,52 @@
+# Single-VPS deployment: the app plus a Postgres for it.
+# Put nginx or Caddy in front for TLS — browsers only grant camera, microphone
+# and screen capture on a secure origin.
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: vo
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-vo}
+      POSTGRES_DB: virtual_office
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vo -d virtual_office"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "2567:2567"
+    environment:
+      NODE_ENV: production
+      PORT: 2567
+      DATABASE_URL: postgres://vo:${POSTGRES_PASSWORD:-vo}@db:5432/virtual_office
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
+      # Configure Microsoft, GitHub, or both. The server refuses to start in
+      # production unless at least one provider is present.
+      MICROSOFT_CLIENT_ID: ${MICROSOFT_CLIENT_ID:-}
+      MICROSOFT_CLIENT_SECRET: ${MICROSOFT_CLIENT_SECRET:-}
+      MICROSOFT_CALLBACK_URL: ${MICROSOFT_CALLBACK_URL:-http://localhost:2567/auth/microsoft/callback}
+      # Must be your tenant GUID in production; "common" is refused there.
+      MICROSOFT_TENANT_ID: ${MICROSOFT_TENANT_ID:-common}
+      GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
+      GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
+      GITHUB_CALLBACK_URL: ${GITHUB_CALLBACK_URL:-http://localhost:2567/auth/github/callback}
+      ALLOWED_EMAIL_DOMAIN: ${ALLOWED_EMAIL_DOMAIN:-}
+      # NAT traversal. Add TURN here when people on restrictive networks
+      # can't connect — no code change needed.
+      STUN_URLS: ${STUN_URLS:-stun:stun.l.google.com:19302,stun:stun1.l.google.com:19302}
+      TURN_URLS: ${TURN_URLS:-}
+      TURN_USERNAME: ${TURN_USERNAME:-}
+      TURN_CREDENTIAL: ${TURN_CREDENTIAL:-}
+
+volumes:
+  db-data:
