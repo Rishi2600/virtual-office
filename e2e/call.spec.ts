@@ -32,9 +32,8 @@ test("walking up to someone connects a call", async () => {
 // Known bugs from docs/audit-2026-10-24.md are marked rather than deleted:
 //  - test.fail():  fails every time today. When the fix lands the test
 //    "unexpectedly passes", which fails CI until the marker is removed.
-//  - test.fixme(): intermittent today (~45% in a 9-run sample), so it is
-//    skipped rather than flapping CI; the fix branch enables it and proves it
-//    with `--repeat-each`.
+//  - test.fixme(): intermittent bugs, skipped rather than flapping CI; the fix
+//    branch enables the test and proves it with `--repeat-each`.
 
 test("each person hears the other", async () => {
   await expect.poll(() => allPeersConnected(alice.page)).toBe(true);
@@ -43,7 +42,6 @@ test("each person hears the other", async () => {
 });
 
 test("negotiation settles on both sides", async () => {
-  test.fixme(true, "RTC-2: intermittent; polite side can stay in have-local-offer");
   await expect.poll(() => allPeersConnected(alice.page)).toBe(true);
   await expect.poll(() => signalingStates(alice.page)).toEqual(["stable"]);
   await expect.poll(() => signalingStates(bob.page)).toEqual(["stable"]);
@@ -51,7 +49,6 @@ test("negotiation settles on both sides", async () => {
 
 for (const role of ["impolite", "polite"] as const) {
   test(`camera from the ${role} side reaches the other person`, async () => {
-    test.fixme(role === "polite", "RTC-2: intermittent; the polite side's offer can be dropped");
     await expect.poll(() => allPeersConnected(alice.page)).toBe(true);
     const alicePolite = await isPolite(alice.page);
     const [sender, receiver] = (role === "polite") === alicePolite ? [alice, bob] : [bob, alice];

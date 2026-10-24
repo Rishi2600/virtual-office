@@ -14,11 +14,8 @@ export default defineConfig({
   // each other's calls.
   workers: 1,
   fullyParallel: false,
-  // Temporary: until the negotiation race (audit RTC-2) is fixed, some calls
-  // never connect, so any test that needs a live call can flake. Retries keep
-  // CI usable and are reported as "flaky", not hidden. Drop back to 0 in
-  // fix/perfect-negotiation.
-  retries: process.env.CI ? 2 : 0,
+  // No retries: a call that only works on the second try is a bug to see.
+  retries: 0,
   timeout: 60_000,
   expect: { timeout: 10_000 },
   reporter: process.env.CI ? [["list"], ["html", { open: "never" }]] : "list",

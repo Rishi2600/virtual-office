@@ -36,13 +36,21 @@ interface Peer {
   polite: boolean;
   makingOffer: boolean;
   ignoreOffer: boolean;
+  /** True while an answer is being applied: an offer arriving then is not a collision. */
+  isSettingRemoteAnswerPending: boolean;
+  /** Incoming signals, applied strictly in arrival order (see onSignal). */
+  signalQueue: Promise<void>;
   remoteStream: MediaStream;
-  audioSender: RTCRtpSender | null;
   /**
-   * Created up-front as recvonly. Turning your camera on flips this same
-   * transceiver to sendrecv rather than adding a second video m-line, which
-   * keeps renegotiation simple and reversible.
+   * Exactly one audio and one video transceiver per call, so two m-lines. The
+   * impolite peer creates them and makes the first offer; the polite peer
+   * adopts the ones that offer creates (adoptTransceivers). The two sides never
+   * both add media at once, so call setup can't glare.
+   *
+   * Both start receive-only. Turning your mic or camera on points the existing
+   * sender at a track and flips it to sendrecv rather than adding m-lines.
    */
+  audioTransceiver: RTCRtpTransceiver | null;
   videoTransceiver: RTCRtpTransceiver | null;
 }
 
@@ -62,11 +70,33 @@ export class PeerManager {
   /** Called once the microphone is (or isn't) available. Safe to call with null. */
   setLocalStream(stream: MediaStream | null): void {
     this.localStream = stream;
-    const audio = stream?.getAudioTracks()[0] ?? null;
-    if (!audio) return;
-    for (const peer of this.peers.values()) {
-      if (!peer.audioSender) peer.audioSender = peer.pc.addTrack(audio, stream!);
+    for (const peer of this.peers.values()) this.applyLocalMedia(peer);
+  }
+
+  /** Points a peer's transceivers at whatever we're currently sending. A peer
+   *  whose transceivers don't exist yet picks this up when it adopts them. */
+  private applyLocalMedia(peer: Peer): void {
+    const audio = this.localStream?.getAudioTracks()[0] ?? null;
+    const audioT = peer.audioTransceiver;
+    if (audio && audioT && audioT.sender.track !== audio) {
+      void audioT.sender.replaceTrack(audio);
+      audioT.direction = "sendrecv";
     }
+
+    const video = this.screenTrack ?? (useStore.getState().camOn ? getVideoTrack() : null);
+    const videoT = peer.videoTransceiver;
+    if (video && videoT && videoT.sender.track !== video) {
+      void videoT.sender.replaceTrack(video);
+      videoT.direction = "sendrecv";
+    }
+  }
+
+  /** Polite side: take over the transceivers the impolite peer's first offer created. */
+  private adoptTransceivers(peer: Peer): void {
+    const transceivers = peer.pc.getTransceivers();
+    peer.audioTransceiver = transceivers.find((t) => t.receiver.track.kind === "audio") ?? null;
+    peer.videoTransceiver = transceivers.find((t) => t.receiver.track.kind === "video") ?? null;
+    this.applyLocalMedia(peer);
   }
 
   setMicEnabled(enabled: boolean): void {
@@ -150,8 +180,10 @@ export class PeerManager {
       polite,
       makingOffer: false,
       ignoreOffer: false,
+      isSettingRemoteAnswerPending: false,
+      signalQueue: Promise.resolve(),
       remoteStream: new MediaStream(),
-      audioSender: null,
+      audioTransceiver: null,
       videoTransceiver: null,
     };
     this.peers.set(peerId, peer);
@@ -200,19 +232,14 @@ export class PeerManager {
       }
     };
 
-    // Audio: send ours if we have it, otherwise stay receive-only so we can
-    // still hear the other person.
-    const audio = this.localStream?.getAudioTracks()[0] ?? null;
-    if (audio) peer.audioSender = pc.addTrack(audio, this.localStream!);
-    else pc.addTransceiver("audio", { direction: "recvonly" });
-
-    // Video: always present, but receive-only until someone turns their camera
-    // on. Reusing this transceiver later avoids a second m-line.
-    const outgoingVideo = this.screenTrack ?? (useStore.getState().camOn ? getVideoTrack() : null);
-    peer.videoTransceiver = pc.addTransceiver("video", {
-      direction: outgoingVideo ? "sendrecv" : "recvonly",
-    });
-    if (outgoingVideo) void peer.videoTransceiver.sender.replaceTrack(outgoingVideo);
+    // Only the impolite peer creates media here, which fires negotiationneeded
+    // and makes it the first offerer. The polite peer adds nothing until that
+    // offer arrives. Without a mic we stay receive-only and can still hear.
+    if (!polite) {
+      peer.audioTransceiver = pc.addTransceiver("audio", { direction: "recvonly" });
+      peer.videoTransceiver = pc.addTransceiver("video", { direction: "recvonly" });
+      this.applyLocalMedia(peer);
+    }
   }
 
   /** Server says they walked away, went into focus mode, locked us out, or dropped. */
@@ -226,23 +253,43 @@ export class PeerManager {
     this.room.send(C2S.Signal, message);
   }
 
-  /** Perfect negotiation: handles offer glare without an extra round trip. */
-  async onSignal({ from, payload }: SignalInMessage): Promise<void> {
+  /**
+   * Signals are applied one at a time, in arrival order. Handled concurrently,
+   * an offer could be judged against a signaling state that an earlier answer
+   * was still in the middle of changing — and wrongly ignored, which left the
+   * polite peer stuck in have-local-offer for the rest of the call.
+   */
+  onSignal({ from, payload }: SignalInMessage): Promise<void> {
     const peer = this.peers.get(from);
-    if (!peer) return; // not a peer we are in proximity with — ignore
-    const { pc } = peer;
+    if (!peer) return Promise.resolve(); // not a peer we are in proximity with — ignore
+    peer.signalQueue = peer.signalQueue.then(() => this.handleSignal(peer, payload));
+    return peer.signalQueue;
+  }
+
+  /** Perfect negotiation (W3C pattern): handles offer glare without an extra round trip. Never throws. */
+  private async handleSignal(peer: Peer, payload: SignalPayload): Promise<void> {
+    const { pc, id: from } = peer;
+    if (pc.signalingState === "closed") return; // peer torn down while this was queued
 
     try {
       if (payload.kind === "description") {
         const description = payload.description as RTCSessionDescriptionInit;
-        const offerCollision =
-          description.type === "offer" && (peer.makingOffer || pc.signalingState !== "stable");
+        const readyForOffer =
+          !peer.makingOffer && (pc.signalingState === "stable" || peer.isSettingRemoteAnswerPending);
+        const offerCollision = description.type === "offer" && !readyForOffer;
 
         peer.ignoreOffer = !peer.polite && offerCollision;
         if (peer.ignoreOffer) return;
 
-        await pc.setRemoteDescription(description);
+        peer.isSettingRemoteAnswerPending = description.type === "answer";
+        try {
+          await pc.setRemoteDescription(description);
+        } finally {
+          peer.isSettingRemoteAnswerPending = false;
+        }
         if (description.type === "offer") {
+          // The first offer is what creates the polite side's transceivers.
+          if (!peer.audioTransceiver) this.adoptTransceivers(peer);
           await pc.setLocalDescription();
           if (pc.localDescription) {
             this.signal(from, {
