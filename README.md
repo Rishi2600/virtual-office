@@ -69,7 +69,10 @@ Muting flips the track's `enabled` flag — it never tears down the call.
 
 **Video is opt-in.** Proximity connects audio only; the camera is acquired the first time you click
 *Turn on video*, and turning it off releases the device. Peers see an initial instead of a video
-tile until someone turns their camera on.
+tile whenever your camera is off. If you deny the camera, clicking *Turn on video* again asks again.
+
+While you share your screen, peers see the screen; your camera can be turned on or off meanwhile
+without interrupting the share, and they see the camera again once you stop sharing.
 
 **Two different ways to not be disturbed**, because they solve different problems:
 
@@ -264,8 +267,10 @@ Peers see you greyed out and your calls tear down immediately rather than freezi
   `@colyseus/schema` v5, while the newest browser client (`colyseus.js` 0.16.x) still expects v3 —
   mixing them silently breaks state sync. `server/src/smoke/colyseus-compat.ts` (`npm run smoke`)
   asserts the pairing still works; run it before upgrading either package.
-- **Screen share uses `replaceTrack`**, so it needs no renegotiation. Trade-off: peers see your
-  screen *instead of* your camera while sharing.
+- **One video channel per call.** Camera and screen share both go through the same video
+  transceiver (`replaceTrack`), so a call never grows extra m-lines; switching between them is
+  instant, and only going from "no video" to "some video" (or back) renegotiates. Trade-off: peers
+  see your screen *instead of* your camera while sharing.
 - **The map is generated** by `scripts/gen-map.mjs` rather than hand-authored, so the floor and
   collision layers can't drift apart. The output is ordinary Tiled JSON — open and edit it in
   [Tiled](https://www.mapeditor.org/) if you prefer.

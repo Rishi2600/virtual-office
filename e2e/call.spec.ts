@@ -6,6 +6,7 @@ import {
   join,
   leave,
   playingRemote,
+  sendingScreen,
   signalingStates,
   walkIntoCall,
   type Person,
@@ -58,31 +59,48 @@ for (const role of ["impolite", "polite"] as const) {
   });
 }
 
-test("your own camera preview shows your video", async () => {
-  test.fail(true, "UX-4: self-preview <video> mounts after its srcObject effect ran");
+test("turning the camera off brings back the initial", async () => {
+  await expect.poll(() => allPeersConnected(alice.page)).toBe(true);
+  const placeholder = bob.page.locator(".bubble-placeholder");
+
   await alice.page.getByRole("button", { name: "Turn on video" }).click();
-  await expect
-    .poll(() =>
-      alice.page.evaluate(() => {
-        const v = document.querySelector<HTMLVideoElement>(".self-preview video");
-        return !!v && !v.paused && v.videoWidth > 0;
-      }),
-    )
-    .toBe(true);
+  await expect.poll(() => playingRemote(bob.page, "video")).toBe(true);
+  await expect(placeholder).toHaveCount(0);
+
+  await alice.page.getByRole("button", { name: "Stop video" }).click();
+  await expect(placeholder).toBeVisible();
+});
+
+const selfPreviewPlaying = (person: Person) =>
+  person.page.evaluate(() => {
+    const v = document.querySelector<HTMLVideoElement>(".self-preview video");
+    return !!v && !v.paused && v.videoWidth > 0;
+  });
+
+test("your own camera preview shows your video", async () => {
+  await alice.page.getByRole("button", { name: "Turn on video" }).click();
+  await expect.poll(() => selfPreviewPlaying(alice)).toBe(true);
 });
 
 test("a screen share keeps flowing when the camera is toggled", async () => {
-  test.fail(true, "RTC-5: camera toggles replace or clear the screen track");
   await expect.poll(() => allPeersConnected(alice.page)).toBe(true);
-  // Share from the impolite side so this test isolates the share/camera logic
-  // from the negotiation race covered above.
-  const [sharer, viewer] = (await isPolite(alice.page)) ? [bob, alice] : [alice, bob];
+  const sharer = alice;
+  const viewer = bob;
 
   await sharer.page.getByRole("button", { name: "Share screen" }).click();
   await expect.poll(() => playingRemote(viewer.page, "video")).toBe(true);
+  await expect.poll(() => sendingScreen(sharer.page)).toBe(true);
+  // Your own screen preview is shown as-is, not mirrored like a camera.
+  await expect(sharer.page.locator(".self-preview video")).toHaveCSS("transform", "none");
 
+  // Turning the camera on mid-share must not replace the screen...
   await sharer.page.getByRole("button", { name: "Turn on video" }).click();
+  await expect(sharer.page.getByRole("button", { name: "Stop video" })).toBeVisible();
+  expect(await sendingScreen(sharer.page)).toBe(true);
+
+  // ...and turning it off must not stop the share.
   await sharer.page.getByRole("button", { name: "Stop video" }).click();
-  await expect(sharer.page.getByRole("button", { name: "Stop sharing" })).toBeVisible();
+  await expect(sharer.page.getByRole("button", { name: "Turn on video" })).toBeVisible();
+  expect(await sendingScreen(sharer.page)).toBe(true);
   expect(await framesDecodedDelta(viewer.page)).toBeGreaterThan(0);
 });

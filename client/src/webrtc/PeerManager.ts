@@ -70,6 +70,10 @@ export class PeerManager {
   /** Called once the microphone is (or isn't) available. Safe to call with null. */
   setLocalStream(stream: MediaStream | null): void {
     this.localStream = stream;
+    this.applyLocalMediaToAll();
+  }
+
+  private applyLocalMediaToAll(): void {
     for (const peer of this.peers.values()) this.applyLocalMedia(peer);
   }
 
@@ -83,11 +87,12 @@ export class PeerManager {
       audioT.direction = "sendrecv";
     }
 
-    const video = this.screenTrack ?? (useStore.getState().camOn ? getVideoTrack() : null);
     const videoT = peer.videoTransceiver;
-    if (video && videoT && videoT.sender.track !== video) {
-      void videoT.sender.replaceTrack(video);
-      videoT.direction = "sendrecv";
+    if (videoT) {
+      const video = this.outgoingVideo();
+      if (videoT.sender.track !== video) void videoT.sender.replaceTrack(video);
+      const direction = video ? "sendrecv" : "recvonly";
+      if (videoT.direction !== direction) videoT.direction = direction;
     }
   }
 
@@ -116,24 +121,28 @@ export class PeerManager {
     if (enabled) {
       const track = await ensureCamera();
       if (!track) return false; // denied or no device — the banner explains
-      for (const peer of this.peers.values()) await this.sendVideo(peer, track);
       useStore.getState().set({ camOn: true });
+      this.applyLocalMediaToAll();
       this.room.send(C2S.SetMedia, { camOn: true });
       return true;
     }
 
-    for (const peer of this.peers.values()) await this.sendVideo(peer, null);
-    stopCamera(); // also clears camOn
+    // Repoint the senders first (to the screen if sharing, else nothing), then
+    // release the device.
+    useStore.getState().set({ camOn: false });
+    this.applyLocalMediaToAll();
+    stopCamera();
     this.room.send(C2S.SetMedia, { camOn: false });
     return true;
   }
 
-  /** Points our video transceiver at a track (or nothing) and flips direction. */
-  private async sendVideo(peer: Peer, track: MediaStreamTrack | null): Promise<void> {
-    const transceiver = peer.videoTransceiver;
-    if (!transceiver) return;
-    await transceiver.sender.replaceTrack(track);
-    transceiver.direction = track ? "sendrecv" : "recvonly";
+  /**
+   * The one rule for what peers see: your screen while you share, otherwise
+   * your camera if it's on, otherwise nothing. Every toggle goes through this,
+   * so turning the camera on or off mid-share never replaces or kills the share.
+   */
+  private outgoingVideo(): MediaStreamTrack | null {
+    return this.screenTrack ?? (useStore.getState().camOn ? getVideoTrack() : null);
   }
 
   // -------------------------------------------------------------- screen share
@@ -150,20 +159,20 @@ export class PeerManager {
     track.addEventListener("ended", () => void this.stopScreenShare());
 
     // Only your current proximity peers receive this — not the whole office.
-    for (const peer of this.peers.values()) await this.sendVideo(peer, track);
+    this.applyLocalMediaToAll();
 
     useStore.getState().set({ sharing: true, screenStream: display });
     this.room.send(C2S.SetMedia, { sharing: true });
   }
 
   async stopScreenShare(): Promise<void> {
-    if (!this.screenTrack) return;
-    // Fall back to the camera if it was on, otherwise to nothing.
-    const camera = useStore.getState().camOn ? getVideoTrack() : null;
-    for (const peer of this.peers.values()) await this.sendVideo(peer, camera);
-
-    this.screenTrack.stop();
+    const screen = this.screenTrack;
+    if (!screen) return;
+    // Falls back to the camera if it's on, otherwise to nothing.
     this.screenTrack = null;
+    this.applyLocalMediaToAll();
+
+    screen.stop();
     useStore.getState().set({ sharing: false, screenStream: null });
     this.room.send(C2S.SetMedia, { sharing: false });
   }

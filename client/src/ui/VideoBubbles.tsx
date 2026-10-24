@@ -1,19 +1,31 @@
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { useStore, type PeerView } from "../store.js";
 import { positionBus } from "../game/bus.js";
 
-/** Attaches a MediaStream to a <video> without React re-creating the element. */
+/**
+ * Attaches a MediaStream to a <video> without React re-creating the element.
+ * A callback ref, so the stream is attached whenever the element mounts; an
+ * effect keyed on the stream missed elements that mount after it changed (the
+ * self-preview stayed black).
+ */
 function useStreamRef(stream: MediaStream | null) {
-  const ref = useRef<HTMLVideoElement>(null);
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    if (el.srcObject !== stream) el.srcObject = stream;
-  }, [stream]);
-  return ref;
+  return useCallback(
+    (el: HTMLVideoElement | null) => {
+      if (el && el.srcObject !== stream) el.srcObject = stream;
+    },
+    [stream],
+  );
 }
 
-function PeerBubble({ peer, name, status }: { peer: PeerView; name: string; status: string }) {
+interface PeerBubbleProps {
+  peer: PeerView;
+  name: string;
+  status: string;
+  /** The peer says their camera or screen is on. */
+  sendingVideo: boolean;
+}
+
+function PeerBubble({ peer, name, status, sendingVideo }: PeerBubbleProps) {
   const box = useRef<HTMLDivElement>(null);
   const video = useStreamRef(peer.stream);
 
@@ -39,7 +51,9 @@ function PeerBubble({ peer, name, status }: { peer: PeerView; name: string; stat
 
   const connecting = peer.connectionState !== "connected";
   // Audio-only is the default, so most bubbles show an initial rather than video.
-  const hasVideo = !!peer.stream?.getVideoTracks().length;
+  // A received video track outlives the peer turning their camera off, so the
+  // track alone isn't enough: their camOn/sharing flags decide.
+  const hasVideo = sendingVideo && !!peer.stream?.getVideoTracks().length;
 
   return (
     <div className={`bubble ${hasVideo ? "" : "bubble-audio"}`} ref={box} data-state={peer.connectionState}>
@@ -78,6 +92,7 @@ export function VideoBubbles() {
             peer={peer}
             name={player?.name ?? "Someone"}
             status={status}
+            sendingVideo={!!player && (player.camOn || player.sharing)}
           />
         );
       })}
@@ -101,7 +116,8 @@ export function SelfPreview() {
   if (!screenStream && !hasCameraVideo) return null;
 
   return (
-    <div className="self-preview">
+    // Mirror only the camera, like a mirror; a mirrored screen is unreadable.
+    <div className={`self-preview ${screenStream ? "" : "self-preview-mirrored"}`}>
       <video ref={video} autoPlay playsInline muted />
       <span className="self-preview-tag">{screenStream ? "your screen" : "you"}</span>
     </div>
