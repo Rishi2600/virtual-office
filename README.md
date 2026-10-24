@@ -47,8 +47,8 @@ it tears down. The faint ring around your avatar shows how close you need to be.
 If your browser blocks sound until you've clicked on the page (common right after signing in), a
 banner offers **Enable audio**; one click and you'll hear the people near you.
 
-Dev sign-in is disabled whenever `NODE_ENV=production`, and the server **refuses to start** if you
-try to enable it there anyway.
+Dev sign-in only exists in development (`npm run dev`). Anywhere else it's off, and the server
+**refuses to start** if you try to turn it on.
 
 ---
 
@@ -115,6 +115,18 @@ reconnect-with-position, and clean leave. Run it after touching anything in `sha
 ## Configuration
 
 Everything has a working dev default. Copy `.env.example` to `.env` to change any of it.
+
+**Development vs production fails closed.** The server is in development mode only when
+`NODE_ENV=development`, which `npm run dev` sets for you. Anything else, including `NODE_ENV`
+unset, runs as production, and the server **refuses to start** unless the config is safe:
+
+- `JWT_SECRET` set, at least 32 characters (`openssl rand -base64 48`)
+- at least one sign-in provider configured
+- `MICROSOFT_TENANT_ID` not `common`
+- `DEV_AUTH` not set to `true` (dev sign-in can't be enabled outside development)
+- numeric settings (`PORT`, `SESSION_TTL_SEC`, `REALTIME_TTL_SEC`) actually numbers
+
+It lists every problem at once, so you fix them in one pass.
 
 ### Sign-in providers
 
@@ -199,7 +211,7 @@ The client fetches ICE configuration from `/api/config` at startup.
 A single VPS is plenty for 20 people.
 
 ```bash
-cp .env.example .env      # set JWT_SECRET, OAuth credentials, NODE_ENV=production
+cp .env.example .env      # set JWT_SECRET (openssl rand -base64 48) and OAuth credentials
 docker compose up -d --build
 ```
 
@@ -209,7 +221,8 @@ server from one origin on port 2567 — put nginx or Caddy in front for TLS.
 **HTTPS is not optional in production.** Browsers only grant camera, microphone, and screen
 capture on a secure origin (`localhost` is the sole exception).
 
-Without Docker: `npm ci && npm run build && npm start`.
+Without Docker: `npm ci && npm run build && npm start`. `npm start` runs as production (no need to
+set `NODE_ENV`), so the same `.env` requirements apply, and it serves the built client itself.
 
 ---
 

@@ -16,7 +16,8 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../
 export interface RunningServer { close: () => Promise<void>; port: number; }
 
 export async function startServer(): Promise<RunningServer> {
-  // Fails fast if production is misconfigured (dev auth left on, default secret).
+  // Fails fast on a bad or unsafe config (see env.ts: anything but
+  // NODE_ENV=development is production, with every guard on).
   assertSafeConfig();
 
   const repo = createRepository();
@@ -63,7 +64,7 @@ export async function startServer(): Promise<RunningServer> {
       env: env.nodeEnv,
       microsoftAuth: microsoftConfigured(),
       githubAuth: githubConfigured(),
-      devAuth: env.devAuth && !env.isProd,
+      devAuth: env.devAuth,
       iceServers: env.iceServers.flatMap((s) => s.urls),
     },
     "virtual office server listening",

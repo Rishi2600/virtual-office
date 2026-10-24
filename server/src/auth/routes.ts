@@ -193,8 +193,9 @@ export function createAuthRouter(repo: Repository): Router {
 
   // ------------------------------------------------------------- Dev bypass
   // Lets you open two tabs as two different users without two real accounts.
-  // env.assertSafeConfig() refuses to boot if this is ever enabled in production.
-  if (env.devAuth && !env.isProd) {
+  // Only exists with NODE_ENV=development (env.devAuth); outside development it
+  // cannot be enabled, and asking for it makes the server refuse to start.
+  if (env.devAuth) {
     router.post("/auth/dev", async (req: Request, res: Response) => {
       const raw = typeof req.body?.name === "string" ? req.body.name.trim() : "";
       const name = raw.slice(0, 32);
@@ -249,7 +250,7 @@ export function createAuthRouter(repo: Repository): Router {
       iceServers: env.iceServers,
       microsoftEnabled: microsoftConfigured(),
       githubEnabled: githubConfigured(),
-      devAuthEnabled: env.devAuth && !env.isProd,
+      devAuthEnabled: env.devAuth,
       spaces: await repo.listSpaces(),
     });
   });

@@ -5,14 +5,39 @@ import { fileURLToPath } from "node:url";
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 dotenv.config({ path: path.join(repoRoot, ".env"), quiet: true });
 
+/**
+ * Fail closed: the server is in development mode ONLY when NODE_ENV is exactly
+ * "development" (`npm run dev` and the tests set it, see src/dev.ts). Anything
+ * else, including NODE_ENV unset, is treated as production: dev sign-in is
+ * off, a real JWT secret is required, and every startup guard applies.
+ */
+const isDev = process.env.NODE_ENV === "development";
+
+/** Problems found while reading env. assertSafeConfig() refuses to start if any. */
+const problems: string[] = [];
+
 const str = (v: string | undefined, d: string) => (v && v.length ? v : d);
-const num = (v: string | undefined, d: number) => (v && !Number.isNaN(+v) ? +v : d);
+/** Empty counts as unset, like every other setting here. */
 const bool = (v: string | undefined, d = false) =>
-  v === undefined ? d : ["1", "true", "yes", "on"].includes(v.toLowerCase());
+  v === undefined || v === "" ? d : ["1", "true", "yes", "on"].includes(v.toLowerCase());
 const list = (v: string | undefined) =>
   (v ?? "").split(",").map((s) => s.trim()).filter(Boolean);
 
+/** A positive whole number, or the default when unset. Garbage is a startup
+ *  error rather than a silent fallback to the default. */
+function int(name: string, d: number): number {
+  const v = process.env[name];
+  if (v === undefined || v === "") return d;
+  const n = Number(v);
+  if (!Number.isInteger(n) || n <= 0) {
+    problems.push(`${name} must be a positive whole number (got "${v}")`);
+    return d;
+  }
+  return n;
+}
+
 const DEV_JWT_SECRET = "dev-only-insecure-secret-change-me";
+const MIN_JWT_SECRET_LENGTH = 32;
 
 export interface IceServer {
   urls: string[];
@@ -45,18 +70,19 @@ function buildIceServers(): IceServer[] {
 }
 
 export const env = {
-  nodeEnv: str(process.env.NODE_ENV, "development"),
-  get isProd() { return this.nodeEnv === "production"; },
+  nodeEnv: str(process.env.NODE_ENV, "production"),
+  isDev,
+  /** Everything that isn't development is production (see isDev above). */
+  isProd: !isDev,
 
-  port: num(process.env.PORT, 2567),
-  publicUrl: str(process.env.PUBLIC_URL, "http://localhost:2567"),
-  clientOrigin: str(process.env.CLIENT_ORIGIN, "http://localhost:5173"),
+  port: int("PORT", 2567),
 
+  /** The dev-only default is accepted in development and refused everywhere else. */
   jwtSecret: str(process.env.JWT_SECRET, DEV_JWT_SECRET),
-  sessionTtlSec: num(process.env.SESSION_TTL_SEC, 7 * 24 * 3600),
+  sessionTtlSec: int("SESSION_TTL_SEC", 7 * 24 * 3600),
   /** Realtime tokens are short-lived on purpose: they are handed to the WS
    *  handshake and are useless if they leak from a log a minute later. */
-  realtimeTtlSec: num(process.env.REALTIME_TTL_SEC, 120),
+  realtimeTtlSec: int("REALTIME_TTL_SEC", 120),
 
   /** Microsoft Entra ID (formerly Azure AD) — covers Outlook / Microsoft 365
    *  work and school accounts. */
@@ -86,7 +112,8 @@ export const env = {
    *  whose primary email is a personal one. */
   allowedEmailDomain: process.env.ALLOWED_EMAIL_DOMAIN ?? "",
 
-  devAuth: bool(process.env.DEV_AUTH, true),
+  /** Dev sign-in: on by default in development, impossible anywhere else. */
+  devAuth: isDev && bool(process.env.DEV_AUTH, true),
   databaseUrl: process.env.DATABASE_URL ?? "",
   logLevel: str(process.env.LOG_LEVEL, "info"),
 
@@ -94,24 +121,38 @@ export const env = {
 };
 
 export function assertSafeConfig(): void {
-  if (!env.isProd) return;
-  const problems: string[] = [];
-  if (env.devAuth) problems.push("DEV_AUTH must be disabled in production");
-  if (env.jwtSecret === DEV_JWT_SECRET) problems.push("JWT_SECRET must be set in production");
-  // At least one real identity provider must be configured, otherwise a
-  // production deploy would have no way for anyone to sign in at all.
-  if (!microsoftConfigured() && !githubConfigured()) {
-    problems.push(
-      "configure at least one sign-in provider: MICROSOFT_CLIENT_ID/MICROSOFT_CLIENT_SECRET or GITHUB_CLIENT_ID/GITHUB_CLIENT_SECRET",
-    );
+  const found = [...problems];
+
+  if (env.isProd) {
+    // Asking for dev sign-in outside development is a misconfiguration worth
+    // stopping for, not something to silently ignore.
+    if (bool(process.env.DEV_AUTH)) {
+      found.push("DEV_AUTH=true is only allowed with NODE_ENV=development");
+    }
+    if (env.jwtSecret === DEV_JWT_SECRET) {
+      found.push("JWT_SECRET must be set (generate one with: openssl rand -base64 48)");
+    } else if (env.jwtSecret.length < MIN_JWT_SECRET_LENGTH) {
+      found.push(
+        `JWT_SECRET must be at least ${MIN_JWT_SECRET_LENGTH} characters (generate one with: openssl rand -base64 48)`,
+      );
+    }
+    // At least one real identity provider must be configured, otherwise a
+    // production deploy would have no way for anyone to sign in at all.
+    if (!microsoftConfigured() && !githubConfigured()) {
+      found.push(
+        "configure at least one sign-in provider: MICROSOFT_CLIENT_ID/MICROSOFT_CLIENT_SECRET or GITHUB_CLIENT_ID/GITHUB_CLIENT_SECRET",
+      );
+    }
+    if (microsoftConfigured() && env.microsoftTenant === "common") {
+      found.push(
+        'MICROSOFT_TENANT_ID must be your tenant GUID in production; "common" lets any Microsoft account sign in',
+      );
+    }
   }
-  if (microsoftConfigured() && env.microsoftTenant === "common") {
-    problems.push(
-      'MICROSOFT_TENANT_ID must be your tenant GUID in production; "common" lets any Microsoft account sign in',
-    );
-  }
-  if (problems.length) {
-    throw new Error(`Refusing to start in production:\n  - ${problems.join("\n  - ")}`);
+
+  if (found.length) {
+    const mode = env.isDev ? "development" : `production (NODE_ENV=${process.env.NODE_ENV ?? "unset"})`;
+    throw new Error(`Refusing to start in ${mode}:\n  - ${found.join("\n  - ")}`);
   }
 }
 

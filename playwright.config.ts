@@ -37,7 +37,7 @@ export default defineConfig({
   },
   webServer: [
     {
-      command: "npx tsx server/src/main.ts",
+      command: "npx tsx server/src/dev.ts",
       url: "http://localhost:2567/health",
       env: { LOG_LEVEL: "warn" },
       reuseExistingServer: !process.env.CI,
