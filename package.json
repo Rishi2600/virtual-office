@@ -14,13 +14,15 @@
     "build:shared": "npm -w @vo/shared run build",
     "start": "npm -w @vo/server run start",
     "test": "npm -w @vo/server run test",
-    "typecheck": "tsc -p server/tsconfig.json --noEmit && tsc -p client/tsconfig.json --noEmit",
+    "typecheck": "tsc -p server/tsconfig.json --noEmit && tsc -p client/tsconfig.json --noEmit && tsc -p e2e/tsconfig.json",
+    "test:e2e": "npm run build:shared && playwright test",
     "lint": "eslint . --max-warnings=0",
     "smoke": "npm -w @vo/server run smoke",
     "gen:tileset": "node scripts/gen-tileset.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.64.1",
     "concurrently": "^9.1.2",
     "eslint": "^10.13.0",
     "eslint-plugin-react-hooks": "^7.1.1",

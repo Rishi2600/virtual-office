@@ -6,3 +6,9 @@ dist/
 .DS_Store
 /docs/
 /CLAUDE.md
+
+# Playwright output (local/CI artifacts only)
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
