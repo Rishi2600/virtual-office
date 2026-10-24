@@ -1,4 +1,6 @@
 import pg from "pg";
+import { log } from "../log.js";
+import { MIGRATIONS, type Migration } from "./migrations.js";
 import {
   DEFAULT_SPACES,
   type Repository,
@@ -7,27 +9,13 @@ import {
   type UserRecord,
 } from "./types.js";
 
-const SCHEMA = [
-  `CREATE EXTENSION IF NOT EXISTS pgcrypto`,
-  `CREATE TABLE IF NOT EXISTS users (
-     id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-     provider     TEXT NOT NULL DEFAULT 'dev',
-     provider_id  TEXT,
-     email        TEXT NOT NULL UNIQUE,
-     name         TEXT NOT NULL DEFAULT '',
-     picture      TEXT NOT NULL DEFAULT '',
-     created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
-     last_seen_at TIMESTAMPTZ NOT NULL DEFAULT now()
-   )`,
-  `CREATE UNIQUE INDEX IF NOT EXISTS users_provider_identity
-     ON users (provider, provider_id) WHERE provider_id IS NOT NULL`,
-  `CREATE TABLE IF NOT EXISTS spaces (
-     id      TEXT PRIMARY KEY,
-     slug    TEXT NOT NULL UNIQUE,
-     name    TEXT NOT NULL,
-     map_key TEXT NOT NULL
-   )`,
-];
+/** Arbitrary but fixed key for pg_advisory_lock: one migrator at a time, even
+ *  across processes starting together. */
+const MIGRATION_LOCK_KEY = 7_436_201;
+
+/** Fail fast instead of waiting forever for a connection when the database is
+ *  down, so /ready reports it within the healthcheck's timeout. */
+const CONNECTION_TIMEOUT_MS = 3_000;
 
 interface Row {
   id: string;
@@ -54,12 +42,23 @@ const toUser = (r: Row): UserRecord => ({
 export class PgRepository implements Repository {
   private pool: pg.Pool;
 
-  constructor(connectionString: string) {
-    this.pool = new pg.Pool({ connectionString });
+  constructor(
+    connectionString: string,
+    private readonly migrations: Migration[] = MIGRATIONS,
+  ) {
+    this.pool = new pg.Pool({ connectionString, connectionTimeoutMillis: CONNECTION_TIMEOUT_MS });
+    // An idle pooled connection can die at any time (database restart, network
+    // blip, idle timeout on a proxy). pg reports that as an 'error' event on the
+    // pool, and an 'error' event with no listener crashes the whole process.
+    // The pool already drops the dead client and opens a new one on next use,
+    // so logging is all that's needed.
+    this.pool.on("error", (err) => {
+      log.error({ err: err.message }, "postgres: idle connection lost (it will be replaced)");
+    });
   }
 
   async init(): Promise<void> {
-    for (const stmt of SCHEMA) await this.pool.query(stmt);
+    await this.migrate();
     for (const s of DEFAULT_SPACES) {
       await this.pool.query(
         `INSERT INTO spaces (id, slug, name, map_key) VALUES ($1,$2,$3,$4)
@@ -116,6 +115,48 @@ export class PgRepository implements Repository {
     );
     const r = rows[0];
     return r ? { id: r.id, slug: r.slug, name: r.name, mapKey: r.map_key } : null;
+  }
+
+  /** Applies every migration the database hasn't recorded yet, in order. */
+  private async migrate(): Promise<void> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("SELECT pg_advisory_lock($1)", [MIGRATION_LOCK_KEY]);
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS schema_migrations (
+          version    INTEGER PRIMARY KEY,
+          name       TEXT NOT NULL,
+          applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )`);
+      const { rows } = await client.query<{ version: number }>("SELECT version FROM schema_migrations");
+      const applied = new Set(rows.map((r) => r.version));
+
+      // A database migrated by a newer build would be silently misread by this one.
+      const known = new Set(this.migrations.map((m) => m.version));
+      const unknown = [...applied].filter((v) => !known.has(v));
+      if (unknown.length) {
+        throw new Error(
+          `database has schema migrations this build doesn't know (${unknown.join(", ")}); deploy the newer build`,
+        );
+      }
+
+      for (const m of [...this.migrations].sort((a, b) => a.version - b.version)) {
+        if (applied.has(m.version)) continue;
+        await client.query("BEGIN");
+        try {
+          await client.query(m.sql);
+          await client.query("INSERT INTO schema_migrations (version, name) VALUES ($1, $2)", [m.version, m.name]);
+          await client.query("COMMIT");
+        } catch (err) {
+          await client.query("ROLLBACK");
+          throw new Error(`migration ${m.version} (${m.name}) failed: ${(err as Error).message}`, { cause: err });
+        }
+        log.info({ version: m.version, name: m.name }, "postgres: migration applied");
+      }
+    } finally {
+      await client.query("SELECT pg_advisory_unlock($1)", [MIGRATION_LOCK_KEY]).catch(() => {});
+      client.release();
+    }
   }
 
   async ping(): Promise<void> {

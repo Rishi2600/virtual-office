@@ -98,6 +98,7 @@ Both are enforced server-side, so a patched client can't force its way into eith
 | `npm test` | End-to-end server test (48 checks — see below), then startup-guard and graceful-shutdown checks |
 | `npm run smoke` | Colyseus client/server compatibility check — run before upgrading any Colyseus package |
 | `npm run lint` | ESLint over every workspace (no warnings allowed) |
+| `npm run test:postgres` | Postgres repository + migrations against a **throwaway** database: `DATABASE_URL=… npm run test:postgres` (it drops its tables) |
 | `npm run test:e2e` | Browser tests: two Chromium tabs with fake mic, camera and screen walk into a call (needs `npx playwright install chromium` once) |
 | `npm run typecheck` | Type-check server and client without building |
 
@@ -185,13 +186,34 @@ Two things worth knowing:
 ### Database
 
 Unset `DATABASE_URL` and the server uses a local JSON file (`.data/dev.json`) so a fresh clone runs
-with zero setup. Set it and it uses PostgreSQL instead — same interface, tables created on boot:
+with zero setup. Set it and it uses PostgreSQL (13 or newer) instead, with the same interface:
 
 ```ini
 DATABASE_URL=postgres://vo:vo@localhost:5432/virtual_office
 ```
 
 Only users and space metadata are stored. Nothing about calls is persisted.
+
+The schema is managed by versioned migrations (`server/src/db/migrations.ts`) that run
+automatically at startup: each one once, in order, in its own transaction. No database extensions
+or superuser rights are needed. If the database goes away, the server keeps running, `/ready`
+reports `503`, and it reconnects on its own when the database is back.
+
+Back up the Docker deployment's database with:
+
+```bash
+docker compose exec -T db pg_dump -U vo virtual_office | gzip > backup-$(date +%F).sql.gz
+```
+
+To restore, load it into a fresh database before the app starts (the app then sees the schema is
+already migrated and leaves it alone):
+
+```bash
+docker compose down -v                    # removes the database volume
+docker compose up -d db
+gunzip -c backup-YYYY-MM-DD.sql.gz | docker compose exec -T db psql -q -U vo virtual_office
+docker compose up -d app
+```
 
 ### TURN (for restrictive networks)
 
