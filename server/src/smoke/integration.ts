@@ -7,6 +7,16 @@
  *
  * Run: npm test
  */
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import dotenv from "dotenv";
+
+// Tests never touch the developer's database (DATABASE_URL): they use
+// TEST_DATABASE_URL when set (CI's Postgres job, or local `npm run db:up`),
+// otherwise the JSON file. Read .env first so TEST_DATABASE_URL from it counts.
+dotenv.config({ path: path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../.env"), quiet: true });
+process.env.DATABASE_URL = process.env.TEST_DATABASE_URL ?? "";
+
 process.env.PORT ??= "2588";
 process.env.DEV_AUTH = "true";
 process.env.NODE_ENV = "development";

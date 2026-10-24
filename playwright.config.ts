@@ -1,4 +1,8 @@
 import { defineConfig, devices } from "@playwright/test";
+import dotenv from "dotenv";
+
+// For TEST_DATABASE_URL: tests never use the developer's DATABASE_URL.
+dotenv.config({ quiet: true });
 
 /**
  * Browser end-to-end tests: two real Chromium contexts with fake mic, camera
@@ -39,7 +43,9 @@ export default defineConfig({
     {
       command: "npx tsx server/src/dev.ts",
       url: "http://localhost:2567/health",
-      env: { LOG_LEVEL: "warn" },
+      // Test database if configured, else the JSON file; never your dev data.
+      // (A dev server you already have running is reused as-is.)
+      env: { LOG_LEVEL: "warn", DATABASE_URL: process.env.TEST_DATABASE_URL ?? "" },
       reuseExistingServer: !process.env.CI,
     },
     {

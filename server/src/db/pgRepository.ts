@@ -41,11 +41,14 @@ const toUser = (r: Row): UserRecord => ({
 
 export class PgRepository implements Repository {
   private pool: pg.Pool;
+  /** host:port/database, for error messages. Never includes the password. */
+  private readonly target: string;
 
   constructor(
     connectionString: string,
     private readonly migrations: Migration[] = MIGRATIONS,
   ) {
+    this.target = describeTarget(connectionString);
     this.pool = new pg.Pool({ connectionString, connectionTimeoutMillis: CONNECTION_TIMEOUT_MS });
     // An idle pooled connection can die at any time (database restart, network
     // blip, idle timeout on a proxy). pg reports that as an 'error' event on the
@@ -119,7 +122,12 @@ export class PgRepository implements Repository {
 
   /** Applies every migration the database hasn't recorded yet, in order. */
   private async migrate(): Promise<void> {
-    const client = await this.pool.connect();
+    const client = await this.pool.connect().catch((err: Error) => {
+      throw new Error(
+        `can't reach Postgres at ${this.target} (${err.message}). For local development, start it with: npm run db:up`,
+        { cause: err },
+      );
+    });
     try {
       await client.query("SELECT pg_advisory_lock($1)", [MIGRATION_LOCK_KEY]);
       await client.query(`
@@ -151,7 +159,7 @@ export class PgRepository implements Repository {
           await client.query("ROLLBACK");
           throw new Error(`migration ${m.version} (${m.name}) failed: ${(err as Error).message}`, { cause: err });
         }
-        log.info({ version: m.version, name: m.name }, "postgres: migration applied");
+        log.info({ version: m.version, migration: m.name }, "postgres: migration applied");
       }
     } finally {
       await client.query("SELECT pg_advisory_unlock($1)", [MIGRATION_LOCK_KEY]).catch(() => {});
@@ -165,5 +173,14 @@ export class PgRepository implements Repository {
 
   async close(): Promise<void> {
     await this.pool.end();
+  }
+}
+
+function describeTarget(connectionString: string): string {
+  try {
+    const u = new URL(connectionString);
+    return `${u.hostname}:${u.port || 5432}${u.pathname}`;
+  } catch {
+    return "the configured database";
   }
 }

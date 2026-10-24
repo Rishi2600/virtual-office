@@ -23,6 +23,27 @@ That's it — no database, no Docker, no `.env` required. Open <http://localhost
 - Client: <http://localhost:5173>
 - Server: <http://localhost:2567>
 
+### With a real Postgres (Docker)
+
+Without a database setting the server keeps users in a local JSON file. To develop against
+PostgreSQL like production does:
+
+```bash
+npm run db:up        # Postgres 17 in Docker on 127.0.0.1:5432 (docker-compose.dev.yml)
+```
+
+then add to `.env` (also in `.env.example`):
+
+```ini
+DATABASE_URL=postgres://vo:vo@localhost:5432/virtual_office
+TEST_DATABASE_URL=postgres://vo:vo@localhost:5432/virtual_office_test
+```
+
+and `npm run dev` as usual: tables are created by the migrations on first start. The tests use
+`TEST_DATABASE_URL` and never touch your dev data. `npm run db:psql` opens a SQL shell,
+`npm run db:down` stops the database (data kept), `npm run db:reset` wipes it. If you forget
+`db:up`, the server says so instead of starting.
+
 ### Try it with two people
 
 Real sign-in needs OAuth credentials (see [below](#sign-in-providers)), so local dev ships a
@@ -98,7 +119,8 @@ Both are enforced server-side, so a patched client can't force its way into eith
 | `npm test` | End-to-end server test (48 checks — see below), then startup-guard and graceful-shutdown checks |
 | `npm run smoke` | Colyseus client/server compatibility check — run before upgrading any Colyseus package |
 | `npm run lint` | ESLint over every workspace (no warnings allowed) |
-| `npm run test:postgres` | Postgres repository + migrations against a **throwaway** database: `DATABASE_URL=… npm run test:postgres` (it drops its tables) |
+| `npm run test:postgres` | Postgres repository + migrations against `TEST_DATABASE_URL` (it drops its tables; refuses a database whose name lacks `test`) |
+| `npm run db:up` / `db:down` / `db:reset` / `db:psql` | Local dev Postgres in Docker (`docker-compose.dev.yml`): start, stop, wipe, SQL shell |
 | `npm run test:e2e` | Browser tests: two Chromium tabs with fake mic, camera and screen walk into a call (needs `npx playwright install chromium` once) |
 | `npm run typecheck` | Type-check server and client without building |
 

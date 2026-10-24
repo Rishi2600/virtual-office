@@ -1,0 +1,38 @@
+# Local development database only. The app itself runs with `npm run dev`.
+#
+#   npm run db:up      start it (waits until it's ready)
+#   npm run db:down    stop it (data is kept)
+#   npm run db:reset   wipe all data and start fresh
+#   npm run db:psql    open a SQL shell on the dev database
+#
+# Two databases: virtual_office (what `npm run dev` uses, via DATABASE_URL) and
+# virtual_office_test (what the tests use, via TEST_DATABASE_URL), so running
+# the tests never touches your dev data.
+#
+# Its own project name, so it never collides with the production stack in
+# docker-compose.yml.
+name: vo-dev
+
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: vo
+      # Local only: the port is bound to 127.0.0.1, so nothing outside this
+      # machine can reach it.
+      POSTGRES_PASSWORD: vo
+      POSTGRES_DB: virtual_office
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - dev-db-data:/var/lib/postgresql/data
+      # Runs once, when the data volume is first created.
+      - ./scripts/dev-db-init.sql:/docker-entrypoint-initdb.d/dev-db-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vo -d virtual_office"]
+      interval: 2s
+      timeout: 5s
+      retries: 15
+
+volumes:
+  dev-db-data:

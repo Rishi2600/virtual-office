@@ -17,6 +17,10 @@
     "typecheck": "tsc -p server/tsconfig.json --noEmit && tsc -p client/tsconfig.json --noEmit && tsc -p e2e/tsconfig.json",
     "test:e2e": "npm run build:shared && playwright test",
     "test:postgres": "npm -w @vo/server run test:postgres",
+    "db:up": "docker compose -f docker-compose.dev.yml up -d --wait",
+    "db:down": "docker compose -f docker-compose.dev.yml down",
+    "db:reset": "docker compose -f docker-compose.dev.yml down -v && npm run db:up",
+    "db:psql": "docker compose -f docker-compose.dev.yml exec db psql -U vo virtual_office",
     "lint": "eslint . --max-warnings=0",
     "smoke": "npm -w @vo/server run smoke",
     "gen:tileset": "node scripts/gen-tileset.mjs"

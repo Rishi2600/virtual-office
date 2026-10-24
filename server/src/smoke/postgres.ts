@@ -1,20 +1,25 @@
 /**
- * Postgres repository test, against a real database. It wipes the schema it
- * creates, so point DATABASE_URL at a throwaway database, e.g.:
+ * Postgres repository test, against a real database. It DROPS the tables it
+ * creates, so it only ever runs against TEST_DATABASE_URL (never
+ * DATABASE_URL), and refuses any database whose name doesn't contain "test".
  *
- *   docker run -d --name vo-pg -e POSTGRES_USER=vo -e POSTGRES_PASSWORD=vo \
- *     -e POSTGRES_DB=vo_test -p 127.0.0.1:55432:5432 postgres:17-alpine
- *   DATABASE_URL=postgres://vo:vo@localhost:55432/vo_test npm run test:postgres
- *
+ * Locally: `npm run db:up` (docker-compose.dev.yml creates virtual_office_test),
+ * put TEST_DATABASE_URL in .env (see .env.example), then `npm run test:postgres`.
  * CI runs it against a Postgres service container.
  */
 import pg from "pg";
 import { PgRepository } from "../db/pgRepository.js";
 import { MIGRATIONS } from "../db/migrations.js";
 
-const url = process.env.DATABASE_URL;
+// Read after the imports above, which load .env (via env.ts).
+const url = process.env.TEST_DATABASE_URL;
 if (!url) {
-  console.error("DATABASE_URL is required (a throwaway database; this test drops its tables). See the header of this file.");
+  console.error("TEST_DATABASE_URL is required: a throwaway database (this test drops its tables). See .env.example.");
+  process.exit(1);
+}
+const dbName = new URL(url).pathname.slice(1);
+if (!dbName.includes("test")) {
+  console.error(`Refusing to run: database "${dbName}" doesn't look like a test database (its name must contain "test").`);
   process.exit(1);
 }
 
