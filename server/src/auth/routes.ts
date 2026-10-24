@@ -36,6 +36,17 @@ type ProviderName = "microsoft" | "github";
 
 type DoneFn = (err: Error | null, user?: UserRecord | false, info?: { message: string }) => void;
 
+/** The profile fields we read. Both strategies hand us a superset of this. */
+interface OAuthProfile {
+  id: string | number;
+  displayName?: string;
+  username?: string;
+  /** Microsoft only: the sign-in name, usually the work address. */
+  userPrincipalName?: string;
+  emails?: Array<{ value: string }>;
+  photos?: Array<{ value: string }>;
+}
+
 /**
  * Shared identity resolution for every OAuth provider: require an email,
  * enforce the domain allow-list, then upsert.
@@ -126,7 +137,7 @@ export function createAuthRouter(repo: Repository): Router {
     passport.use(
       new MicrosoftStrategy(
         microsoftOptions,
-        (_accessToken: string, _refreshToken: string, profile: any, done: DoneFn) => {
+        (_accessToken: string, _refreshToken: string, profile: OAuthProfile, done: DoneFn) => {
           void upsertFromProvider(
             repo,
             "microsoft",
@@ -158,7 +169,7 @@ export function createAuthRouter(repo: Repository): Router {
           // keep it private, and sign-in would fail for them.
           scope: ["user:email"],
         },
-        (_accessToken: string, _refreshToken: string, profile: any, done: DoneFn) => {
+        (_accessToken: string, _refreshToken: string, profile: OAuthProfile, done: DoneFn) => {
           void upsertFromProvider(
             repo,
             "github",
