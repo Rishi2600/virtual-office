@@ -15,7 +15,7 @@
     "start": "npm -w @vo/server run start",
     "test": "npm -w @vo/server run test",
     "typecheck": "tsc -p server/tsconfig.json --noEmit && tsc -p client/tsconfig.json --noEmit",
-    "smoke": "npm run build:shared && node --experimental-strip-types server/src/smoke/colyseus-compat.ts",
+    "smoke": "npm -w @vo/server run smoke",
     "gen:tileset": "node scripts/gen-tileset.mjs"
   },
   "devDependencies": {
