@@ -45,8 +45,9 @@ RUN mkdir -p .data && chown node:node .data
 USER node
 
 EXPOSE 2567
+# /ready, not /health: unhealthy also when the database is unreachable.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-  CMD node -e "fetch('http://localhost:' + (process.env.PORT || 2567) + '/health').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"
+  CMD node -e "fetch('http://localhost:' + (process.env.PORT || 2567) + '/ready').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"
 
 # Serves both the API/game server and the built client from one origin.
 # node directly (not npm) so it receives SIGTERM itself.

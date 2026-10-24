@@ -28,7 +28,25 @@ export async function startServer(): Promise<RunningServer> {
   app.use(cookieParser());
   app.use(createAuthRouter(repo));
 
+  /** Set when shutdown starts, so /ready turns away new traffic while we drain. */
+  let shuttingDown = false;
+
+  /** Liveness: the process is up and its event loop answers. */
   app.get("/health", (_req, res) => res.json({ ok: true, uptime: process.uptime() }));
+
+  /** Readiness: able to serve right now. 503 while shutting down or if the
+   *  database is unreachable. Details go to the log, not to the caller. */
+  app.get("/ready", async (_req, res) => {
+    let database: "ok" | "error" = "ok";
+    try {
+      await repo.ping?.();
+    } catch (err) {
+      database = "error";
+      log.error({ err: (err as Error).message }, "readiness: database check failed");
+    }
+    const ready = database === "ok" && !shuttingDown;
+    res.status(ready ? 200 : 503).json({ ready, database, shuttingDown });
+  });
 
   // In production the API and the built client are the same origin, so the
   // session cookie just works. In dev, Vite proxies /api and /auth here instead.
@@ -53,6 +71,12 @@ export async function startServer(): Promise<RunningServer> {
     // `presence: new RedisPresence(...)` and `driver: new RedisDriver(...)` here
     // (@colyseus/redis-presence, @colyseus/redis-driver). Nothing in OfficeRoom
     // reaches outside its own instance, so no room code changes.
+
+    // We own the process signals (see shutdown below). With Colyseus's own
+    // handler also installed, whichever ran first exited the process in the
+    // middle of the other's shutdown: clients were never told, rooms never
+    // disposed, and the last log lines were lost.
+    gracefullyShutdown: false,
   });
 
   gameServer.define("office", OfficeRoom);
@@ -70,17 +94,56 @@ export async function startServer(): Promise<RunningServer> {
     "virtual office server listening",
   );
 
-  const close = async () => {
-    await gameServer.gracefullyShutdown(false);
-    await repo.close();
-  };
+  // Idempotent: a second signal (or a test calling close()) joins the same shutdown.
+  let closing: Promise<void> | null = null;
+  const close = () =>
+    (closing ??= (async () => {
+      shuttingDown = true;
+      // Disconnects every client (consented, so no 30s reconnect hold) and
+      // disposes the rooms, then stops the HTTP/WS listener.
+      await gameServer.gracefullyShutdown(false);
+      await repo.close();
+    })());
 
-  const shutdown = async (signal: string) => {
-    log.info({ signal }, 'shutting down');
-    try { await close(); } finally { process.exit(0); }
+  const shutdown = (signal: string) => {
+    log.info({ signal }, "shutting down");
+    // Never outlive the orchestrator's grace period (Docker: 10s, then SIGKILL).
+    setTimeout(() => {
+      log.error({ timeoutMs: SHUTDOWN_TIMEOUT_MS }, "shutdown timed out, exiting anyway");
+      exitAfterFlush(1);
+    }, SHUTDOWN_TIMEOUT_MS).unref();
+    close().then(
+      () => {
+        log.info("shutdown complete");
+        exitAfterFlush(0);
+      },
+      (err: unknown) => {
+        log.error({ err: (err as Error)?.message ?? err }, "shutdown failed");
+        exitAfterFlush(1);
+      },
+    );
   };
-  process.on('SIGINT', () => void shutdown('SIGINT'));
-  process.on('SIGTERM', () => void shutdown('SIGTERM'));
+  process.once("SIGINT", () => shutdown("SIGINT"));
+  process.once("SIGTERM", () => shutdown("SIGTERM"));
+
+  // Colyseus used to log these for us; with its handler off, we do. A crash
+  // exits right away (the orchestrator restarts us) rather than limping on.
+  process.on("uncaughtException", (err) => {
+    log.fatal({ err: err.stack ?? err.message }, "uncaught exception");
+    exitAfterFlush(1);
+  });
+  process.on("unhandledRejection", (reason) => {
+    log.fatal({ err: (reason as Error)?.stack ?? String(reason) }, "unhandled promise rejection");
+    exitAfterFlush(1);
+  });
 
   return { close, port: env.port };
+}
+
+/** Under Docker's default 10s stop grace period. */
+const SHUTDOWN_TIMEOUT_MS = 8_000;
+
+/** Exits once buffered log lines are written, so the reason for exiting isn't lost. */
+function exitAfterFlush(code: number): void {
+  log.flush(() => process.exit(code));
 }

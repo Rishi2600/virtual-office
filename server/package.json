@@ -8,7 +8,7 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/main.js",
     "smoke": "tsx src/smoke/colyseus-compat.ts",
-    "test": "tsx src/smoke/integration.ts && tsx src/smoke/config.ts"
+    "test": "tsx src/smoke/integration.ts && tsx src/smoke/config.ts && tsx src/smoke/shutdown.ts"
   },
   "dependencies": {
     "@colyseus/core": "^0.16.26",

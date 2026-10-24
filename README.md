@@ -95,7 +95,7 @@ Both are enforced server-side, so a patched client can't force its way into eith
 | `npm run dev` | Shared watcher + server + client, all three |
 | `npm run build` | Type-check and build every workspace |
 | `npm start` | Run the production server (serves the built client) |
-| `npm test` | End-to-end server test (48 checks — see below) |
+| `npm test` | End-to-end server test (48 checks — see below), then startup-guard and graceful-shutdown checks |
 | `npm run smoke` | Colyseus client/server compatibility check — run before upgrading any Colyseus package |
 | `npm run lint` | ESLint over every workspace (no warnings allowed) |
 | `npm run test:e2e` | Browser tests: two Chromium tabs with fake mic, camera and screen walk into a call (needs `npx playwright install chromium` once) |
@@ -226,7 +226,12 @@ on **`127.0.0.1:2567` only**: run nginx or Caddy on the same host for TLS and pr
 The image is built from an allowlist (`.dockerignore`), so your `.env`, local data and git history
 never go into it; secrets reach the container only as environment variables at runtime. It runs as
 the unprivileged `node` user, contains only the server's production dependencies plus the built
-client, and has a built-in healthcheck on `/health`.
+client, and has a built-in healthcheck.
+
+Two endpoints for monitoring: **`/health`** answers whenever the process is up (liveness), and
+**`/ready`** returns 200 only when it can serve, i.e. the database answers and it isn't shutting
+down (503 otherwise). On `docker stop` (SIGTERM) the server disconnects everyone cleanly, closes
+the database and exits within 8 seconds; clients reconnect on their own once it's back.
 
 **HTTPS is not optional in production.** Browsers only grant camera, microphone, and screen
 capture on a secure origin (`localhost` is the sole exception).

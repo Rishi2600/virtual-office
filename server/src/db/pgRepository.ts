@@ -118,6 +118,10 @@ export class PgRepository implements Repository {
     return r ? { id: r.id, slug: r.slug, name: r.name, mapKey: r.map_key } : null;
   }
 
+  async ping(): Promise<void> {
+    await this.pool.query("SELECT 1");
+  }
+
   async close(): Promise<void> {
     await this.pool.end();
   }

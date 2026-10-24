@@ -61,6 +61,7 @@ jobs:
           done
           docker inspect -f '{{.State.Health.Status}}' vo | grep -qx healthy
           curl -fsS localhost:2567/health
+          curl -fsS localhost:2567/ready
           test "$(docker run --rm --entrypoint id vo:ci -u)" != 0
           test "$(curl -s -o /dev/null -w '%{http_code}' -X POST localhost:2567/auth/dev)" = 404
 

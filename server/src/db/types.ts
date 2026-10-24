@@ -36,6 +36,9 @@ export interface Repository {
   touchUser(id: string): Promise<void>;
   listSpaces(): Promise<SpaceRecord[]>;
   getSpaceBySlug(slug: string): Promise<SpaceRecord | null>;
+  /** Readiness probe: rejects if the store can't be reached. Optional because
+   *  the local JSON file has nothing to reach. */
+  ping?(): Promise<void>;
   close(): Promise<void>;
 }
 
