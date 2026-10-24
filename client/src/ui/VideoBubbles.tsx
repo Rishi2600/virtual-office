@@ -44,7 +44,8 @@ function PeerBubble({ peer, name, status }: { peer: PeerView; name: string; stat
   return (
     <div className={`bubble ${hasVideo ? "" : "bubble-audio"}`} ref={box} data-state={peer.connectionState}>
       <div className="bubble-video">
-        <video ref={video} autoPlay playsInline />
+        {/* Muted: the peer's voice plays through RemoteAudio. */}
+        <video ref={video} autoPlay playsInline muted />
         {!hasVideo && <div className="bubble-placeholder">{name.slice(0, 1).toUpperCase()}</div>}
         {connecting && <div className="bubble-connecting">connecting…</div>}
       </div>

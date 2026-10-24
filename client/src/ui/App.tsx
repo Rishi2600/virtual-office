@@ -6,7 +6,8 @@ import { GameCanvas } from "../game/GameCanvas.js";
 import { Login } from "./Login.js";
 import { PresenceList } from "./PresenceList.js";
 import { Controls } from "./Controls.js";
-import { ConnectionBanner, LiveIndicator, MediaBanner } from "./Banners.js";
+import { AudioBlockedBanner, ConnectionBanner, LiveIndicator, MediaBanner } from "./Banners.js";
+import { RemoteAudio } from "./RemoteAudio.js";
 import { Chat } from "./Chat.js";
 import { SelfPreview, VideoBubbles } from "./VideoBubbles.js";
 
@@ -67,10 +68,12 @@ export function App() {
       <div className="stage">
         {session && <GameCanvas />}
         <VideoBubbles />
+        <RemoteAudio />
         <SelfPreview />
         <LiveIndicator />
         <div className="banners">
           <ConnectionBanner />
+          <AudioBlockedBanner />
           <MediaBanner session={session} />
         </div>
       </div>

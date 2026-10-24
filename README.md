@@ -44,6 +44,9 @@ it tears down. The faint ring around your avatar shows how close you need to be.
 > touched** until you click *Turn on video*. If you deny either, the app says so explicitly and
 > still connects you receive-only, so you can hear the other person and use chat.
 
+If your browser blocks sound until you've clicked on the page (common right after signing in), a
+banner offers **Enable audio**; one click and you'll hear the people near you.
+
 Dev sign-in is disabled whenever `NODE_ENV=production`, and the server **refuses to start** if you
 try to enable it there anyway.
 
