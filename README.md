@@ -90,6 +90,7 @@ Both are enforced server-side, so a patched client can't force its way into eith
 | `npm run build` | Type-check and build every workspace |
 | `npm start` | Run the production server (serves the built client) |
 | `npm test` | End-to-end server test (48 checks — see below) |
+| `npm run smoke` | Colyseus client/server compatibility check — run before upgrading any Colyseus package |
 | `npm run gen:tileset` | Regenerate `tiles.png` / `avatars.png` |
 | `node scripts/gen-map.mjs` | Regenerate the office map |
 
