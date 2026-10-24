@@ -88,6 +88,11 @@ Dev sign-in only exists in development (`npm run dev`). Anywhere else it's off, 
 
 Muting flips the track's `enabled` flag — it never tears down the call.
 
+Each call tile shows how the call is doing: a small **green / amber / red dot** for connection
+quality (round-trip time and packet loss), **reconnecting…** while it recovers from a network
+hiccup, and **can't connect** if it still hasn't after several tries. It keeps retrying in the
+background for as long as you stay near the person.
+
 **Video is opt-in.** Proximity connects audio only; the camera is acquired the first time you click
 *Turn on video*, and turning it off releases the device. Peers see an initial instead of a video
 tile whenever your camera is off. If you deny the camera, clicking *Turn on video* again asks again.

@@ -391,8 +391,8 @@ body {
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
 }
 
-.bubble[data-state="failed"] .bubble-video,
-.bubble[data-state="disconnected"] .bubble-video { border-color: var(--bad); }
+.bubble[data-status="reconnecting"] .bubble-video { border-color: var(--warn); }
+.bubble[data-status="failed"] .bubble-video { border-color: var(--bad); }
 
 .bubble-video video {
   width: 100%;
@@ -412,15 +412,35 @@ body {
   background: var(--panel-2);
 }
 
-.bubble-connecting {
+.bubble-overlay {
   position: absolute;
   inset: 0;
-  display: grid;
-  place-items: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  padding: 6px;
+  text-align: center;
   font-size: 11px;
-  color: var(--muted);
-  background: rgba(12, 15, 20, 0.72);
+  color: var(--text);
+  background: rgba(12, 15, 20, 0.78);
 }
+.bubble[data-status="failed"] .bubble-overlay { color: var(--bad); }
+.bubble-overlay-hint { font-size: 9px; color: var(--muted); }
+
+.bubble-quality {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px rgba(12, 15, 20, 0.7);
+}
+.bubble-quality[data-quality="good"] { background: var(--good); }
+.bubble-quality[data-quality="fair"] { background: var(--warn); }
+.bubble-quality[data-quality="poor"] { background: var(--bad); }
 
 .bubble-name {
   margin-top: 4px;

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef } from "react";
-import { useStore, type PeerView } from "../store.js";
+import { useStore, type CallQuality, type CallStatus, type PeerView } from "../store.js";
 import { positionBus } from "../game/bus.js";
 
 /**
@@ -15,6 +15,34 @@ function useStreamRef(stream: MediaStream | null) {
     },
     [stream],
   );
+}
+
+const STATUS_TEXT: Record<Exclude<CallStatus, "connected">, string> = {
+  connecting: "connecting…",
+  reconnecting: "reconnecting…",
+  failed: "can't connect",
+};
+
+/** Covers the tile whenever the call isn't working, saying why. */
+function CallStatusOverlay({ status }: { status: CallStatus }) {
+  if (status === "connected") return null;
+  return (
+    <div className="bubble-overlay" role="status">
+      <span>{STATUS_TEXT[status]}</span>
+      {status === "failed" && <span className="bubble-overlay-hint">network may be blocking calls · still trying</span>}
+    </div>
+  );
+}
+
+/** Green / amber / red dot for the call's measured quality. */
+function QualityDot({ quality }: { quality: CallQuality }) {
+  const parts = [
+    `connection ${quality.level}`,
+    quality.rttMs !== null ? `${quality.rttMs} ms` : null,
+    quality.lossPct !== null ? `${quality.lossPct}% loss` : null,
+    quality.relayed ? "via relay" : null,
+  ].filter(Boolean);
+  return <span className="bubble-quality" data-quality={quality.level} aria-label={parts.join(", ")} title={parts.join(", ")} />;
 }
 
 interface PeerBubbleProps {
@@ -49,19 +77,19 @@ function PeerBubble({ peer, name, status, sendingVideo }: PeerBubbleProps) {
     [peer.peerId],
   );
 
-  const connecting = peer.connectionState !== "connected";
   // Audio-only is the default, so most bubbles show an initial rather than video.
   // A received video track outlives the peer turning their camera off, so the
   // track alone isn't enough: their camOn/sharing flags decide.
   const hasVideo = sendingVideo && !!peer.stream?.getVideoTracks().length;
 
   return (
-    <div className={`bubble ${hasVideo ? "" : "bubble-audio"}`} ref={box} data-state={peer.connectionState}>
+    <div className={`bubble ${hasVideo ? "" : "bubble-audio"}`} ref={box} data-status={peer.callStatus}>
       <div className="bubble-video">
         {/* Muted: the peer's voice plays through RemoteAudio. */}
         <video ref={video} autoPlay playsInline muted />
         {!hasVideo && <div className="bubble-placeholder">{name.slice(0, 1).toUpperCase()}</div>}
-        {connecting && <div className="bubble-connecting">connecting…</div>}
+        <CallStatusOverlay status={peer.callStatus} />
+        {peer.callStatus === "connected" && peer.quality && <QualityDot quality={peer.quality} />}
       </div>
       <div className="bubble-name">
         {name}

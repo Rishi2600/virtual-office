@@ -40,6 +40,20 @@ export interface PlayerView {
   isSelf: boolean;
 }
 
+/** The call as the user should understand it, recovery included (see PeerManager). */
+export type CallStatus = "connecting" | "connected" | "reconnecting" | "failed";
+
+/** Rolled up from RTCPeerConnection.getStats() every couple of seconds. */
+export interface CallQuality {
+  level: "good" | "fair" | "poor";
+  /** Round trip on the active network path, in ms. */
+  rttMs: number | null;
+  /** Incoming audio packets lost since the previous sample, in percent. */
+  lossPct: number | null;
+  /** True when traffic goes through a TURN relay instead of directly. */
+  relayed: boolean;
+}
+
 export interface PeerView {
   peerId: string;
   stream: MediaStream | null;
@@ -48,6 +62,8 @@ export interface PeerView {
    *  to a media element, so this can't reuse `stream`. */
   audio: MediaStream | null;
   connectionState: RTCPeerConnectionState;
+  callStatus: CallStatus;
+  quality: CallQuality | null;
 }
 
 interface Store {
@@ -129,6 +145,8 @@ export const useStore = create<Store>((set) => ({
         stream: null,
         audio: null,
         connectionState: "new",
+        callStatus: "connecting",
+        quality: null,
       };
       return { peers: { ...s.peers, [peerId]: { ...existing, ...patch, peerId } } };
     }),

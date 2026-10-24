@@ -6,8 +6,9 @@ import {
   type SignalOutMessage,
   type SignalPayload,
 } from "@vo/shared";
-import { useStore } from "../store.js";
+import { useStore, type CallStatus } from "../store.js";
 import { ensureCamera, getVideoTrack, stopCamera } from "./media.js";
+import { summarize, type QualitySample } from "./callQuality.js";
 
 /**
  * ============================================================================
@@ -52,7 +53,29 @@ interface Peer {
    */
   audioTransceiver: RTCRtpTransceiver | null;
   videoTransceiver: RTCRtpTransceiver | null;
+
+  // ---- recovery (see onConnectionState)
+  /** Pending check after a "disconnected" (which often heals on its own). */
+  graceTimer: ReturnType<typeof setTimeout> | null;
+  /** Next scheduled ICE restart while recovering. */
+  restartTimer: ReturnType<typeof setTimeout> | null;
+  recovering: boolean;
+  /** ICE restarts in the current recovery; reset once connected again. */
+  restarts: number;
+  /** The server has been told about this failure (once per episode). */
+  failureReported: boolean;
+  /** Previous getStats() counters, for packet loss since the last sample. */
+  qualitySample: QualitySample | null;
 }
+
+/** A "disconnected" connection often recovers by itself within a few seconds. */
+const DISCONNECTED_GRACE_MS = 4_000;
+/** Pause before each ICE restart: quick at first, then every 30s for as long
+ *  as the two people are still near each other. */
+const RESTART_DELAYS_MS = [0, 2_000, 4_000, 8_000, 15_000, 30_000];
+/** After this many restarts the tile says "can't connect" (it keeps trying). */
+const RESTARTS_BEFORE_FAILED = 3;
+const STATS_INTERVAL_MS = 2_000;
 
 export class PeerManager {
   /** Exposed (not private) so live connections can be inspected from the
@@ -60,11 +83,14 @@ export class PeerManager {
   readonly peers = new Map<string, Peer>();
   private localStream: MediaStream | null = null;
   private screenTrack: MediaStreamTrack | null = null;
+  private readonly statsTimer: ReturnType<typeof setInterval>;
 
   constructor(
     private readonly room: Room,
     private readonly iceServers: RTCIceServer[],
-  ) {}
+  ) {
+    this.statsTimer = setInterval(() => void this.sampleQuality(), STATS_INTERVAL_MS);
+  }
 
   // --------------------------------------------------------------- local media
   /** Called once the microphone is (or isn't) available. Safe to call with null. */
@@ -194,6 +220,12 @@ export class PeerManager {
       remoteStream: new MediaStream(),
       audioTransceiver: null,
       videoTransceiver: null,
+      graceTimer: null,
+      restartTimer: null,
+      recovering: false,
+      restarts: 0,
+      failureReported: false,
+      qualitySample: null,
     };
     this.peers.set(peerId, peer);
     useStore.getState().upsertPeer(peerId, { stream: peer.remoteStream, connectionState: "new" });
@@ -228,18 +260,7 @@ export class PeerManager {
       }
     };
 
-    pc.onconnectionstatechange = () => {
-      useStore.getState().upsertPeer(peerId, { connectionState: pc.connectionState });
-      if (pc.connectionState === "failed") {
-        console.error("[webrtc] connection failed", peerId);
-        // Reported so every failed call shows up in ONE server-side log rather
-        // than only in whichever browser console happened to be open.
-        this.room.send(C2S.RtcFailure, { peerId, state: pc.connectionState });
-        try {
-          pc.restartIce();
-        } catch { /* older browsers: nothing more we can do here */ }
-      }
-    };
+    pc.onconnectionstatechange = () => this.onConnectionState(peer);
 
     // Only the impolite peer creates media here, which fires negotiationneeded
     // and makes it the first offerer. The polite peer adds nothing until that
@@ -248,6 +269,103 @@ export class PeerManager {
       peer.audioTransceiver = pc.addTransceiver("audio", { direction: "recvonly" });
       peer.videoTransceiver = pc.addTransceiver("video", { direction: "recvonly" });
       this.applyLocalMedia(peer);
+    }
+  }
+
+  // ------------------------------------------------------------------ recovery
+  /**
+   * Keeps a call alive through network trouble, and tells the user what's
+   * happening instead of failing silently:
+   *  - connected: all good, recovery state reset.
+   *  - disconnected: often heals by itself, so wait a moment before acting.
+   *  - failed: ICE restarts with back-off (RESTART_DELAYS_MS) for as long as
+   *    the two are still near each other; the server's proximity exit ends it.
+   */
+  private onConnectionState(peer: Peer): void {
+    const state = peer.pc.connectionState;
+    useStore.getState().upsertPeer(peer.id, { connectionState: state });
+
+    if (state === "connected") {
+      this.clearRecoveryTimers(peer);
+      peer.recovering = false;
+      peer.restarts = 0;
+      peer.failureReported = false;
+      this.setCallStatus(peer, "connected");
+    } else if (state === "disconnected") {
+      peer.graceTimer ??= setTimeout(() => {
+        peer.graceTimer = null;
+        if (peer.pc.connectionState !== "connected") this.recover(peer);
+      }, DISCONNECTED_GRACE_MS);
+    } else if (state === "failed") {
+      if (peer.graceTimer) clearTimeout(peer.graceTimer);
+      peer.graceTimer = null;
+      this.recover(peer);
+    }
+  }
+
+  private recover(peer: Peer): void {
+    if (peer.recovering || this.peers.get(peer.id) !== peer) return;
+    peer.recovering = true;
+    this.setCallStatus(peer, "reconnecting");
+    this.scheduleRestart(peer);
+  }
+
+  private scheduleRestart(peer: Peer): void {
+    const delay = RESTART_DELAYS_MS[Math.min(peer.restarts, RESTART_DELAYS_MS.length - 1)]!;
+    peer.restartTimer = setTimeout(() => {
+      peer.restartTimer = null;
+      if (this.peers.get(peer.id) !== peer || !peer.recovering) return; // gone, or recovered
+      peer.restarts++;
+      if (peer.restarts > RESTARTS_BEFORE_FAILED) this.markFailed(peer);
+      try {
+        // New ICE credentials and candidates, renegotiated through the usual
+        // perfect-negotiation path.
+        peer.pc.restartIce();
+      } catch { /* closed meanwhile */ }
+      this.scheduleRestart(peer);
+    }, delay);
+  }
+
+  private markFailed(peer: Peer): void {
+    this.setCallStatus(peer, "failed");
+    if (peer.failureReported) return;
+    peer.failureReported = true;
+    console.warn("[webrtc] call still not connected after ICE restarts", peer.id, peer.restarts);
+    // Once per failure episode, so every failed call shows up in ONE
+    // server-side log rather than only in whichever console happened to be open.
+    this.room.send(C2S.RtcFailure, {
+      peerId: peer.id,
+      state: peer.pc.connectionState,
+      detail: `not connected after ${peer.restarts - 1} ICE restarts`,
+    });
+  }
+
+  private clearRecoveryTimers(peer: Peer): void {
+    if (peer.graceTimer) clearTimeout(peer.graceTimer);
+    if (peer.restartTimer) clearTimeout(peer.restartTimer);
+    peer.graceTimer = null;
+    peer.restartTimer = null;
+  }
+
+  private setCallStatus(peer: Peer, callStatus: CallStatus): void {
+    if (useStore.getState().peers[peer.id]?.callStatus !== callStatus) {
+      useStore.getState().upsertPeer(peer.id, { callStatus });
+    }
+  }
+
+  // ------------------------------------------------------------------- quality
+  /** Samples every connected call's stats into a good/fair/poor quality. */
+  private async sampleQuality(): Promise<void> {
+    for (const peer of this.peers.values()) {
+      if (peer.pc.connectionState !== "connected") continue;
+      try {
+        const { quality, sample } = summarize(await peer.pc.getStats(), peer.qualitySample);
+        peer.qualitySample = sample;
+        const current = useStore.getState().peers[peer.id]?.quality;
+        if (JSON.stringify(current) !== JSON.stringify(quality)) {
+          useStore.getState().upsertPeer(peer.id, { quality });
+        }
+      } catch { /* closed between the check and getStats() */ }
     }
   }
 
@@ -331,6 +449,7 @@ export class PeerManager {
     if (!peer) return;
     this.peers.delete(peerId);
 
+    this.clearRecoveryTimers(peer);
     const { pc } = peer;
     pc.onicecandidate = null;
     pc.ontrack = null;
@@ -351,6 +470,7 @@ export class PeerManager {
 
   /** Tear down every call — used on disconnect and on unmount. */
   closeAll(): void {
+    clearInterval(this.statsTimer);
     for (const id of [...this.peers.keys()]) this.destroyPeer(id);
     if (this.screenTrack) {
       this.screenTrack.stop();

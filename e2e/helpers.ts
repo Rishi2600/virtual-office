@@ -127,6 +127,38 @@ export const sendingScreen = (page: Page) =>
     ),
   );
 
+/**
+ * Makes this page's peer connections report `state` (null = back to the real
+ * one) and fires connectionstatechange, so the app's recovery logic runs as if
+ * the network had failed. Also counts real restartIce() calls (restartCount).
+ */
+export const simulateConnectionState = (page: Page, state: RTCPeerConnectionState | null) =>
+  page.evaluate((s) => {
+    for (const peer of window.__session?.peers?.peers.values() ?? []) {
+      const pc = peer.pc as RTCPeerConnection & { __restarts?: number };
+      if (pc.__restarts === undefined) {
+        pc.__restarts = 0;
+        const real = pc.restartIce.bind(pc);
+        pc.restartIce = () => {
+          pc.__restarts! += 1;
+          real();
+        };
+      }
+      if (s === null) Reflect.deleteProperty(pc, "connectionState");
+      else Object.defineProperty(pc, "connectionState", { configurable: true, get: () => s });
+      pc.dispatchEvent(new Event("connectionstatechange"));
+    }
+  }, state);
+
+/** ICE restarts since simulateConnectionState() was first called on this page. */
+export const restartCount = (page: Page) =>
+  page.evaluate(() =>
+    [...(window.__session?.peers?.peers.values() ?? [])].reduce(
+      (n, p) => n + ((p.pc as RTCPeerConnection & { __restarts?: number }).__restarts ?? 0),
+      0,
+    ),
+  );
+
 /** Video frames decoded from peers over a short window — proves frames are still flowing. */
 export async function framesDecodedDelta(page: Page, windowMs = 1500): Promise<number> {
   const read = () =>
