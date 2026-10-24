@@ -10,9 +10,10 @@ import { useStore, type MediaState } from "../store.js";
  *    NotFoundError and you get *nothing* — not even audio. Splitting them means
  *    each device degrades on its own.
  *
- * 2. **We prompt once per device and cache the outcome.** If the user denies,
- *    we never re-prompt automatically; the UI offers an explicit retry, which is
- *    the only thing that clears the cache.
+ * 2. **We never re-prompt on our own.** The microphone is requested on load,
+ *    so its outcome is cached and only the banner's explicit retry clears it.
+ *    The camera is only requested by a click, so each click is itself an
+ *    explicit retry and a camera failure is not cached.
  *
  * The camera is only ever requested when the user asks for it, so walking past
  * somebody never turns your webcam on.
@@ -113,6 +114,8 @@ export function ensureCamera(): Promise<MediaStreamTrack | null> {
       return videoTrack;
     })
     .catch((err) => {
+      // Not cached: the next "Turn on video" click asks again.
+      camPromise = null;
       const { state, message } = classify(err);
       useStore.getState().set({
         camState: state,
@@ -142,12 +145,6 @@ export function retryMicrophone(): Promise<MediaStreamTrack | null> {
   micPromise = null;
   useStore.getState().set({ micState: "idle", mediaError: "" });
   return ensureMicrophone();
-}
-
-export function retryCamera(): Promise<MediaStreamTrack | null> {
-  camPromise = null;
-  useStore.getState().set({ camState: "idle", cameraError: "" });
-  return ensureCamera();
 }
 
 export function stopAllMedia(): void {

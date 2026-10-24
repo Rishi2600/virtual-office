@@ -27,9 +27,11 @@ export interface Person {
   page: Page;
 }
 
-/** Signs a fresh person in through the dev route and waits until they're in the office. */
-export async function join(browser: Browser, label: string): Promise<Person> {
+/** Signs a fresh person in through the dev route and waits until they're in the office.
+ *  `init` runs in the page before any app code (e.g. to simulate a device failure). */
+export async function join(browser: Browser, label: string, init?: () => void): Promise<Person> {
   const context = await browser.newContext();
+  if (init) await context.addInitScript(init);
   const page = await context.newPage();
   const name = `${label}-${Math.random().toString(36).slice(2, 7)}`;
   await page.goto(`/?dev=${encodeURIComponent(name)}`);
@@ -115,6 +117,15 @@ export const playingRemote = (page: Page, kind: "audio" | "video") =>
       return k === "audio" ? !el.muted : (el as HTMLVideoElement).videoWidth > 0;
     });
   }, kind);
+
+/** Is this page currently sending a screen capture (not a camera) to its peers?
+ *  Screen tracks report `displaySurface` in their settings; camera tracks don't. */
+export const sendingScreen = (page: Page) =>
+  page.evaluate(() =>
+    [...(window.__session?.peers?.peers.values() ?? [])].some((peer) =>
+      peer.pc.getSenders().some((s) => s.track?.kind === "video" && "displaySurface" in s.track.getSettings()),
+    ),
+  );
 
 /** Video frames decoded from peers over a short window — proves frames are still flowing. */
 export async function framesDecodedDelta(page: Page, windowMs = 1500): Promise<number> {

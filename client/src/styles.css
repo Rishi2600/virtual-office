@@ -445,8 +445,8 @@ body {
 .self-preview video {
   width: 100%;
   display: block;
-  transform: scaleX(-1);
 }
+.self-preview-mirrored video { transform: scaleX(-1); }
 .self-preview-off {
   position: absolute;
   inset: 0;
