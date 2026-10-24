@@ -3,7 +3,7 @@ import react from "@vitejs/plugin-react";
 
 // The API and the game server share an origin in production. In dev we proxy
 // /api and /auth to the Node server so the session cookie stays first-party and
-// the Google OAuth redirect works without CORS.
+// the OAuth redirects (Microsoft, GitHub) work without CORS.
 export default defineConfig({
   plugins: [react()],
   server: {
@@ -16,5 +16,7 @@ export default defineConfig({
   // @vo/shared is a linked workspace package; let Vite process its source
   // rather than trying to pre-bundle it.
   optimizeDeps: { exclude: ["@vo/shared"] },
-  build: { outDir: "dist", sourcemap: true },
+  // "hidden": maps are written for local debugging, but the bundle doesn't
+  // point at them, and the Docker image deletes them so they're never served.
+  build: { outDir: "dist", sourcemap: "hidden" },
 });

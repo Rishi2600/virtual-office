@@ -1,0 +1,23 @@
+# Allowlist: only what the image build needs is sent to Docker. Anything not
+# listed here (.env, .data/, .git/, docs/, node_modules/, CLAUDE.md, tests...)
+# never reaches the build context, so a new secret file can't leak by accident.
+*
+
+!package.json
+!package-lock.json
+!tsconfig.base.json
+
+!shared/package.json
+!shared/tsconfig.json
+!shared/src/**
+
+!server/package.json
+!server/tsconfig.json
+!server/src/**
+
+!client/package.json
+!client/tsconfig.json
+!client/vite.config.ts
+!client/index.html
+!client/src/**
+!client/public/**

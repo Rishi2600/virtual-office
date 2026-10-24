@@ -39,6 +39,35 @@ jobs:
         run: npm audit --audit-level=high
         continue-on-error: true
 
+  docker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      # .dockerignore is an allowlist, so a file the build needs but isn't
+      # listed fails here rather than at deploy time.
+      - run: docker build -t vo:ci .
+
+      - name: Image boots in production mode and passes its healthcheck
+        run: |
+          docker run -d --name vo -p 2567:2567 \
+            -e JWT_SECRET="$(openssl rand -base64 48)" \
+            -e GITHUB_CLIENT_ID=ci -e GITHUB_CLIENT_SECRET=ci \
+            vo:ci
+          for i in $(seq 1 30); do
+            [ "$(docker inspect -f '{{.State.Health.Status}}' vo)" = healthy ] && break
+            sleep 2
+          done
+          docker inspect -f '{{.State.Health.Status}}' vo | grep -qx healthy
+          curl -fsS localhost:2567/health
+          test "$(docker run --rm --entrypoint id vo:ci -u)" != 0
+          test "$(curl -s -o /dev/null -w '%{http_code}' -X POST localhost:2567/auth/dev)" = 404
+
+      - name: Container logs
+        if: failure()
+        run: docker logs vo
+
   e2e:
     runs-on: ubuntu-latest
     timeout-minutes: 20

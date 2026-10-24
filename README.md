@@ -214,12 +214,19 @@ The client fetches ICE configuration from `/api/config` at startup.
 A single VPS is plenty for 20 people.
 
 ```bash
-cp .env.example .env      # set JWT_SECRET (openssl rand -base64 48) and OAuth credentials
+cp .env.example .env      # set JWT_SECRET, POSTGRES_PASSWORD and OAuth credentials
 docker compose up -d --build
 ```
 
-`docker-compose.yml` runs the app plus PostgreSQL. The app serves the built client and the game
-server from one origin on port 2567 — put nginx or Caddy in front for TLS.
+`docker-compose.yml` runs the app plus PostgreSQL and refuses to start without `JWT_SECRET` and
+`POSTGRES_PASSWORD`. The app serves the built client and the game server from one origin, published
+on **`127.0.0.1:2567` only**: run nginx or Caddy on the same host for TLS and proxy to it
+(including WebSocket upgrades).
+
+The image is built from an allowlist (`.dockerignore`), so your `.env`, local data and git history
+never go into it; secrets reach the container only as environment variables at runtime. It runs as
+the unprivileged `node` user, contains only the server's production dependencies plus the built
+client, and has a built-in healthcheck on `/health`.
 
 **HTTPS is not optional in production.** Browsers only grant camera, microphone, and screen
 capture on a secure origin (`localhost` is the sole exception).

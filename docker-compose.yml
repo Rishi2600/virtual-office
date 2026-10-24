@@ -7,7 +7,7 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: vo
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-vo}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
       POSTGRES_DB: virtual_office
     volumes:
       - db-data:/var/lib/postgresql/data
@@ -20,15 +20,19 @@ services:
   app:
     build: .
     restart: unless-stopped
+    # Small init process as PID 1: forwards signals and reaps zombies.
+    init: true
     depends_on:
       db:
         condition: service_healthy
     ports:
-      - "2567:2567"
+      # Localhost only: the TLS proxy (nginx/Caddy) on this host is the public
+      # entry point. Plain HTTP must not be reachable from outside.
+      - "127.0.0.1:2567:2567"
     environment:
       NODE_ENV: production
       PORT: 2567
-      DATABASE_URL: postgres://vo:${POSTGRES_PASSWORD:-vo}@db:5432/virtual_office
+      DATABASE_URL: postgres://vo:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/virtual_office
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
       # Configure Microsoft, GitHub, or both. The server refuses to start in
       # production unless at least one provider is present.
