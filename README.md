@@ -92,9 +92,10 @@ Both are enforced server-side, so a patched client can't force its way into eith
 | `npm test` | End-to-end server test (48 checks — see below) |
 | `npm run smoke` | Colyseus client/server compatibility check — run before upgrading any Colyseus package |
 | `npm run lint` | ESLint over every workspace (no warnings allowed) |
+| `npm run test:e2e` | Browser tests: two Chromium tabs with fake mic, camera and screen walk into a call (needs `npx playwright install chromium` once) |
 | `npm run typecheck` | Type-check server and client without building |
 
-Every push runs lint, typecheck, build, `npm test` and `npm run smoke` in GitHub Actions
+Every push runs lint, typecheck, build, `npm test`, `npm run smoke` and the browser tests in GitHub Actions
 (`.github/workflows/ci.yml`).
 | `npm run gen:tileset` | Regenerate `tiles.png` / `avatars.png` |
 | `node scripts/gen-map.mjs` | Regenerate the office map |
