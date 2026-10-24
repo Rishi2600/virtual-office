@@ -43,6 +43,10 @@ export interface PlayerView {
 export interface PeerView {
   peerId: string;
   stream: MediaStream | null;
+  /** The peer's audio, in a stream created WITH its track. Chrome never starts
+   *  playing an audio-only stream whose track was added after it was attached
+   *  to a media element, so this can't reuse `stream`. */
+  audio: MediaStream | null;
   connectionState: RTCPeerConnectionState;
 }
 
@@ -71,6 +75,9 @@ interface Store {
   camOn: boolean;
   sharing: boolean;
   status: PlayerStatus;
+
+  /** The browser refused to start remote audio without a user gesture. */
+  audioBlocked: boolean;
 
   /** Relay-only, in-memory. Never persisted anywhere. */
   chat: ChatInMessage[];
@@ -104,6 +111,7 @@ const initial = {
   camOn: false,
   sharing: false,
   status: "available" as PlayerStatus,
+  audioBlocked: false,
   chat: [] as ChatInMessage[],
   chatOpen: false,
   unreadChat: 0,
@@ -119,6 +127,7 @@ export const useStore = create<Store>((set) => ({
       const existing: PeerView = s.peers[peerId] ?? {
         peerId,
         stream: null,
+        audio: null,
         connectionState: "new",
       };
       return { peers: { ...s.peers, [peerId]: { ...existing, ...patch, peerId } } };

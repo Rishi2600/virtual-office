@@ -1,6 +1,7 @@
 import { useStore } from "../store.js";
 import { retryMicrophone } from "../webrtc/media.js";
 import type { Session } from "../net/session.js";
+import { resumeRemoteAudio } from "./RemoteAudio.js";
 
 export function ConnectionBanner() {
   const connection = useStore((s) => s.connection);
@@ -48,6 +49,22 @@ export function MediaBanner({ session }: { session: Session | null }) {
         }}
       >
         Try again
+      </button>
+    </div>
+  );
+}
+
+/** Shown when the browser's autoplay policy stopped incoming audio — typically
+ *  right after an OAuth redirect, before the page has had a click. */
+export function AudioBlockedBanner() {
+  const blocked = useStore((s) => s.audioBlocked);
+  if (!blocked) return null;
+
+  return (
+    <div className="banner banner-warn">
+      <span>Your browser paused incoming audio. Click to hear the people near you.</span>
+      <button className="btn btn-small" onClick={resumeRemoteAudio}>
+        Enable audio
       </button>
     </div>
   );

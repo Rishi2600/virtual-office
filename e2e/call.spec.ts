@@ -37,7 +37,6 @@ test("walking up to someone connects a call", async () => {
 //    with `--repeat-each`.
 
 test("each person hears the other", async () => {
-  test.fail(true, "RTC-1: remote audio element never leaves readyState 0");
   await expect.poll(() => allPeersConnected(alice.page)).toBe(true);
   await expect.poll(() => playingRemote(alice.page, "audio")).toBe(true);
   await expect.poll(() => playingRemote(bob.page, "audio")).toBe(true);

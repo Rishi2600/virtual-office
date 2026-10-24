@@ -163,7 +163,11 @@ export class PeerManager {
 
     pc.ontrack = (ev) => {
       peer.remoteStream.addTrack(ev.track);
-      useStore.getState().upsertPeer(peerId, { stream: peer.remoteStream });
+      useStore.getState().upsertPeer(peerId, {
+        stream: peer.remoteStream,
+        // A fresh stream that already holds the track: see PeerView.audio.
+        ...(ev.track.kind === "audio" ? { audio: new MediaStream([ev.track]) } : {}),
+      });
     };
 
     pc.onnegotiationneeded = async () => {
