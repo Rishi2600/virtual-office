@@ -14,6 +14,7 @@ export function App() {
   const me = useStore((s) => s.me);
   const config = useStore((s) => s.config);
   const authChecked = useStore((s) => s.authChecked);
+  const meId = me?.id;
   const [session, setSession] = useState<Session | null>(null);
   const sessionRef = useRef<Session | null>(null);
 
@@ -33,10 +34,13 @@ export function App() {
 
   // Join the space once we know who we are.
   useEffect(() => {
-    if (!me || !config) return;
+    if (!meId || !config) return;
 
     const s = new Session();
     sessionRef.current = s;
+    // The session is an external resource created here and handed to the
+    // children; storing it in state is what lets them re-render against it.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setSession(s);
     // Lets you inspect live peer connections from the console when a call
     // misbehaves: __session.peers
@@ -53,7 +57,7 @@ export function App() {
       setSession(null);
       void s.disconnect();
     };
-  }, [me?.id, config]);
+  }, [meId, config]);
 
   if (!authChecked) return <div className="boot">Loading…</div>;
   if (!me) return <Login />;
