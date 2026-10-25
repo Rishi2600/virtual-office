@@ -1,8 +1,17 @@
 import { create } from "zustand";
-import type { ChatInMessage, PlayerStatus } from "@vo/shared";
+import type { ChatInMessage, ChatScope, PlayerStatus } from "@vo/shared";
 
 /** Keeps memory bounded — chat is ephemeral, so old messages simply age out. */
 const CHAT_HISTORY_LIMIT = 200;
+
+/** A chat line: a relayed message, or a local note ("Bob joined your huddle")
+ *  that exists only in this browser. Neither is ever stored. */
+export type ChatLine =
+  | ({ kind: "msg" } & ChatInMessage)
+  | { kind: "sys"; id: string; scope: ChatScope; text: string; at: number };
+
+/** Dialogs the app can show (one at a time). */
+export type DialogName = "settings" | "avatar" | "finder" | null;
 
 export type ConnectionState = "idle" | "connecting" | "connected" | "reconnecting" | "failed";
 
@@ -96,14 +105,22 @@ interface Store {
   audioBlocked: boolean;
 
   /** Relay-only, in-memory. Never persisted anywhere. */
-  chat: ChatInMessage[];
-  chatOpen: boolean;
-  unreadChat: number;
+  chat: ChatLine[];
+  chatTab: ChatScope;
+  /** Chat panel showing (docked on wide screens, a drawer on narrower ones). */
+  chatVisible: boolean;
+  unread: Record<ChatScope, number>;
+
+  /** Session ids currently speaking (local audio analysis, nothing recorded). */
+  speaking: Record<string, boolean>;
+
+  dialog: DialogName;
 
   set: (patch: Partial<Store>) => void;
   upsertPeer: (peerId: string, patch: Partial<PeerView>) => void;
   removePeer: (peerId: string) => void;
-  addChat: (message: ChatInMessage) => void;
+  addChat: (line: ChatLine) => void;
+  markRead: (scope: ChatScope) => void;
   reset: () => void;
 }
 
@@ -128,9 +145,12 @@ const initial = {
   sharing: false,
   status: "available" as PlayerStatus,
   audioBlocked: false,
-  chat: [] as ChatInMessage[],
-  chatOpen: false,
-  unreadChat: 0,
+  chat: [] as ChatLine[],
+  chatTab: "nearby" as ChatScope,
+  chatVisible: true,
+  unread: { nearby: 0, room: 0 } as Record<ChatScope, number>,
+  speaking: {} as Record<string, boolean>,
+  dialog: null as DialogName,
 };
 
 export const useStore = create<Store>((set) => ({
@@ -159,11 +179,21 @@ export const useStore = create<Store>((set) => ({
       return { peers: next };
     }),
 
-  addChat: (message) =>
-    set((s) => ({
-      chat: [...s.chat, message].slice(-CHAT_HISTORY_LIMIT),
-      unreadChat: s.chatOpen ? 0 : s.unreadChat + 1,
-    })),
+  addChat: (line) =>
+    set((s) => {
+      // Unread unless you're looking right at it: your own messages and local
+      // notes never count.
+      const seen =
+        s.chatVisible && s.chatTab === line.scope && document.visibilityState === "visible";
+      const counts = line.kind === "msg" && line.from !== s.sessionId && !seen;
+      return {
+        chat: [...s.chat, line].slice(-CHAT_HISTORY_LIMIT),
+        unread: counts ? { ...s.unread, [line.scope]: s.unread[line.scope] + 1 } : s.unread,
+      };
+    }),
+
+  markRead: (scope) =>
+    set((s) => (s.unread[scope] ? { unread: { ...s.unread, [scope]: 0 } } : s)),
 
   reset: () => set({ ...initial, authChecked: true }),
 }));

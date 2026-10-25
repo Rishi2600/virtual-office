@@ -18,33 +18,33 @@ test.afterEach(async () => {
 
 test("connection quality is shown for a healthy call", async () => {
   for (const p of [alice, bob]) {
-    await expect(p.page.locator('.bubble-quality[data-quality="good"]')).toBeVisible();
+    await expect(p.page.locator('.tile-quality[data-quality="good"]')).toBeVisible();
   }
 });
 
 test("a failed call retries with back-off and says so, then recovers", async () => {
-  const tile = alice.page.locator(".bubble");
+  const tile = alice.page.locator('[data-testid="tile"]');
   await simulateConnectionState(alice.page, "failed");
 
   // Straight to a retry, shown as "reconnecting…".
   await expect(tile).toHaveAttribute("data-status", "reconnecting");
-  await expect(alice.page.locator(".bubble-overlay")).toContainText("reconnecting…");
+  await expect(alice.page.locator(".tile-overlay")).toContainText("reconnecting…");
   await expect.poll(() => restartCount(alice.page)).toBeGreaterThanOrEqual(1);
 
   // After the quick attempts (0s, 2s, 4s, 8s) it admits it can't connect, but keeps trying.
-  await expect(alice.page.locator(".bubble-overlay")).toContainText("can't connect", { timeout: 25_000 });
-  await expect(alice.page.locator(".bubble-overlay-hint")).toContainText("still trying");
+  await expect(alice.page.locator(".tile-overlay")).toContainText("can't connect", { timeout: 25_000 });
+  await expect(alice.page.locator(".tile-overlay-hint")).toContainText("still trying");
   expect(await restartCount(alice.page)).toBe(4);
 
   // Back on the network: the overlay clears and the quality dot returns.
   await simulateConnectionState(alice.page, null);
   await expect(tile).toHaveAttribute("data-status", "connected");
-  await expect(alice.page.locator(".bubble-overlay")).toHaveCount(0);
-  await expect(alice.page.locator(".bubble-quality")).toBeVisible();
+  await expect(alice.page.locator(".tile-overlay")).toHaveCount(0);
+  await expect(alice.page.locator(".tile-quality")).toBeVisible();
 });
 
 test("a brief disconnect heals without a restart; a lasting one is recovered", async () => {
-  const tile = alice.page.locator(".bubble");
+  const tile = alice.page.locator('[data-testid="tile"]');
 
   await simulateConnectionState(alice.page, "disconnected");
   await alice.page.waitForTimeout(1_000);

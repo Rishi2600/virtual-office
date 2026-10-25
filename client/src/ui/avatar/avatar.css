@@ -1,0 +1,4 @@
+.avatar-img { position: relative; display: inline-block; flex: none; overflow: hidden; }
+.avatar-img canvas { display: block; image-rendering: pixelated; }
+.avatar-img.face { border-radius: 50%; background: var(--surface-3); }
+.avatar-img.dim { opacity: 0.45; }

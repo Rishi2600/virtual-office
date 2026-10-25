@@ -35,7 +35,7 @@ function createGame(el: HTMLElement, width: number, height: number): Phaser.Game
   const game = new Phaser.Game({
     type: Phaser.AUTO,
     parent: el,
-    backgroundColor: "#1c1f26",
+    backgroundColor: "#0b0d12",
     pixelArt: true,
     width,
     height,
@@ -79,7 +79,15 @@ export function GameCanvas() {
     return () => observer.disconnect();
   }, []);
 
-  return <div className="game-host" ref={host} />;
+  return (
+    <div
+      className="game-host"
+      ref={host}
+      tabIndex={0}
+      data-map-focus
+      aria-label="Office map. Move with the arrow keys or W A S D."
+    />
+  );
 }
 
 // Without this, editing this module during dev strands the old game and leaks

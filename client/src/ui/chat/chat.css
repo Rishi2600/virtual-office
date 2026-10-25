@@ -1,0 +1,36 @@
+.chat-panel { display: flex; flex-direction: column; min-height: 0; height: 100%; background: var(--surface-1); }
+.chat-head { display: flex; align-items: flex-end; justify-content: space-between; padding: 8px 10px 0 12px; border-bottom: 1px solid var(--border); }
+.chat-list { position: relative; flex: 1; min-height: 0; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+.chat-empty { margin: 4px 0; color: var(--text-muted); font-size: var(--fs-sm); }
+.chat-sys {
+  align-self: center; display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px;
+  border-radius: var(--r-full); background: var(--surface-2); color: var(--text-muted); font-size: var(--fs-xs);
+}
+.chat-msg { display: flex; gap: 9px; }
+.chat-msg.cont { margin-top: -6px; }
+.chat-ava { width: 28px; flex: none; }
+.chat-body { min-width: 0; }
+.chat-meta { font-size: var(--fs-xs); color: var(--text-muted); }
+.chat-meta b { color: var(--text); margin-right: 4px; font-weight: 600; }
+.chat-text { overflow-wrap: anywhere; }
+.chat-msg.mine { flex-direction: column; align-items: flex-end; }
+.chat-bubble {
+  max-width: 85%; padding: 7px 10px; border-radius: 12px 12px 4px 12px; overflow-wrap: anywhere;
+  background: var(--brand-soft); border: 1px solid rgba(177, 140, 255, 0.28);
+}
+.chat-jump {
+  position: sticky; bottom: 0; align-self: center; display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 12px; border: 0; border-radius: var(--r-full); background: var(--brand); color: #fff; font-size: var(--fs-xs);
+  box-shadow: var(--shadow-2);
+}
+.chat-compose { padding: 10px 12px 12px; border-top: 1px solid var(--border); }
+.chat-input {
+  display: flex; align-items: center; gap: 4px; padding: 3px 3px 3px 10px;
+  background: var(--surface-2); border: 1px solid var(--border-strong); border-radius: var(--r-md);
+}
+.chat-input:focus-within { border-color: var(--accent); }
+.chat-input input { flex: 1; min-width: 0; border: 0; background: transparent; padding: 6px 0; outline: none; }
+.chat-input input::placeholder { color: var(--text-muted); }
+.chat-input input:disabled { cursor: not-allowed; }
+.chat-hint { display: flex; justify-content: space-between; gap: 8px; margin-top: 6px; font-size: var(--fs-xs); color: var(--text-muted); }
+.chat-hint span { display: inline-flex; align-items: center; gap: 4px; }

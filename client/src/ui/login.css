@@ -1,0 +1,66 @@
+/* Interim sign-in styles; the Lamports sign-in page replaces these (UI rebuild step 10). */
+
+.btn-microsoft,
+.btn-github {
+  font-weight: 600;
+  text-align: center;
+  width: 100%;
+  margin-bottom: 8px;
+}
+
+.btn-microsoft {
+  background: #fff;
+  color: #202124;
+  border-color: #fff;
+}
+.btn-microsoft:hover:not(:disabled) { background: #eef1f5; }
+
+.btn-github {
+  background: #24292f;
+  color: #fff;
+  border-color: #3d444d;
+}
+.btn-github:hover:not(:disabled) { background: #32383f; }
+
+/* ------------------------------------------------------------------- login */
+.login { display: grid; place-items: center; height: 100%; padding: 20px; }
+.login-card {
+  width: 100%;
+  max-width: 380px;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 26px;
+}
+.login-card h1 { margin: 0 0 6px; font-size: 22px; }
+.login-sub { margin: 0 0 20px; color: var(--text-muted); }
+.login-note { color: var(--text-muted); font-size: 12px; margin: 10px 0; }
+.login-note code { background: var(--surface-2); padding: 1px 4px; border-radius: 3px; }
+.login-error { color: var(--danger); font-size: 13px; }
+.login-row { display: flex; gap: 8px; }
+.login-row input {
+  flex: 1;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  color: var(--text);
+  padding: 7px 10px;
+  font: inherit;
+}
+.login-divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 22px 0 4px;
+  color: var(--text-muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.login-divider::before, .login-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+

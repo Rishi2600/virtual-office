@@ -2,6 +2,7 @@ import {
   useEffect,
   useId,
   useRef,
+  useState,
   type ButtonHTMLAttributes,
   type KeyboardEvent,
   type ReactNode,
@@ -214,6 +215,100 @@ export function Dialog({
         </div>
       )}
     </dialog>
+  );
+}
+
+// -------------------------------------------------------------------- Menu
+export interface MenuItem {
+  label: string;
+  icon?: ReactNode;
+  onSelect: () => void;
+  tone?: "danger";
+}
+
+/**
+ * A button that opens a small menu (WAI-ARIA menu button): arrow keys move,
+ * Enter selects, Esc or a click outside closes and returns focus.
+ */
+export function MenuButton({
+  label,
+  trigger,
+  items,
+  align = "right",
+  placement = "down",
+  className = "",
+}: {
+  label: string;
+  trigger: ReactNode;
+  items: MenuItem[];
+  align?: "left" | "right";
+  placement?: "down" | "up";
+  className?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const wrap = useRef<HTMLDivElement>(null);
+  const button = useRef<HTMLButtonElement>(null);
+  const menuId = useId();
+
+  useEffect(() => {
+    if (!open) return;
+    const first = wrap.current?.querySelector<HTMLElement>("[role=menuitem]");
+    first?.focus();
+    const onDown = (e: PointerEvent) => {
+      if (!wrap.current?.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("pointerdown", onDown);
+    return () => document.removeEventListener("pointerdown", onDown);
+  }, [open]);
+
+  const close = () => {
+    setOpen(false);
+    button.current?.focus();
+  };
+  const onKey = (e: KeyboardEvent<HTMLDivElement>) => {
+    const items = [...(wrap.current?.querySelectorAll<HTMLElement>("[role=menuitem]") ?? [])];
+    const i = items.indexOf(document.activeElement as HTMLElement);
+    if (e.key === "Escape") close();
+    else if (e.key === "ArrowDown") items[(i + 1) % items.length]?.focus();
+    else if (e.key === "ArrowUp") items[(i - 1 + items.length) % items.length]?.focus();
+    else return;
+    e.preventDefault();
+  };
+
+  return (
+    <div className="menu-wrap" ref={wrap} onKeyDown={onKey}>
+      <button
+        ref={button}
+        type="button"
+        className={`menu-trigger ${className}`}
+        aria-label={label}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-controls={open ? menuId : undefined}
+        onClick={() => setOpen((o) => !o)}
+      >
+        {trigger}
+      </button>
+      {open && (
+        <div id={menuId} role="menu" aria-label={label} className={`menu align-${align} place-${placement}`}>
+          {items.map((it) => (
+            <button
+              key={it.label}
+              type="button"
+              role="menuitem"
+              className={`menu-item ${it.tone === "danger" ? "danger" : ""}`}
+              onClick={() => {
+                setOpen(false);
+                it.onSelect();
+              }}
+            >
+              {it.icon}
+              {it.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 

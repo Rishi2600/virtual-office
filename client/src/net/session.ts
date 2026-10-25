@@ -88,16 +88,18 @@ export class Session {
     this.peers.setLocalStream(useStore.getState().localStream);
 
     room.onMessage(S2C.ProximityEnter, (m: ProximityEnterMessage) => {
+      if (!useStore.getState().peers[m.peerId]) this.note(m.peerId, "joined your huddle");
       this.peers?.onProximityEnter(m);
     });
     room.onMessage(S2C.ProximityExit, (m: ProximityExitMessage) => {
+      if (useStore.getState().peers[m.peerId]) this.note(m.peerId, "left your huddle");
       this.peers?.onProximityExit(m.peerId);
     });
     room.onMessage(S2C.Signal, (m: SignalInMessage) => {
       void this.peers?.onSignal(m);
     });
     room.onMessage(S2C.Chat, (m: ChatInMessage) => {
-      useStore.getState().addChat(m);
+      useStore.getState().addChat({ kind: "msg", ...m });
     });
 
     room.onStateChange(() => this.mirrorState());
@@ -118,6 +120,13 @@ export class Session {
     const s = useStore.getState();
     room.send(C2S.SetStatus, { status: s.status });
     room.send(C2S.SetMedia, { micOn: s.micOn, camOn: s.camOn, sharing: s.sharing });
+  }
+
+  /** A local line in the nearby chat ("Bob joined your huddle"); never sent anywhere. */
+  private note(peerId: string, what: string): void {
+    const name = useStore.getState().players[peerId]?.name ?? "Someone";
+    const at = Date.now();
+    useStore.getState().addChat({ kind: "sys", id: `sys-${at}-${peerId}`, scope: "nearby", text: `${name} ${what}`, at });
   }
 
   /** Projects Colyseus state into the store for the React UI (presence list,

@@ -24,13 +24,12 @@ function denyCameraOnce(): void {
 
 test("the camera can be retried after it was denied", async ({ browser }) => {
   carol = await join(browser, "Carol", denyCameraOnce);
-  const button = carol.page.getByRole("button", { name: "Turn on video" });
-
-  await button.click();
+  await carol.page.getByRole("button", { name: "Turn camera on" }).click();
   await expect(carol.page.getByText("Camera blocked in your browser")).toBeVisible();
 
-  // A second click asks again instead of replaying the cached failure.
-  await button.click();
-  await expect(carol.page.getByRole("button", { name: "Stop video" })).toBeVisible();
+  // The button now says it's blocked, and a second click asks again instead
+  // of replaying the cached failure.
+  await carol.page.getByRole("button", { name: "Camera blocked: try again" }).click();
+  await expect(carol.page.getByRole("button", { name: "Turn camera off" })).toBeVisible();
   await expect(carol.page.getByText("Camera blocked in your browser")).toHaveCount(0);
 });

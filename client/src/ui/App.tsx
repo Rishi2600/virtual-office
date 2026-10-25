@@ -2,20 +2,20 @@ import { useEffect, useRef, useState } from "react";
 import { useStore } from "../store.js";
 import { applyDevIdentityFromUrl, fetchConfig, fetchMe } from "../net/api.js";
 import { Session } from "../net/session.js";
-import { GameCanvas } from "../game/GameCanvas.js";
 import { Login } from "./Login.js";
-import { PresenceList } from "./PresenceList.js";
-import { Controls } from "./Controls.js";
-import { AudioBlockedBanner, ConnectionBanner, LiveIndicator, MediaBanner } from "./Banners.js";
-import { RemoteAudio } from "./RemoteAudio.js";
-import { Chat } from "./Chat.js";
-import { SelfPreview, VideoBubbles } from "./VideoBubbles.js";
+import { useLayout } from "./layout.js";
+import { Office } from "./stage/Office.js";
+import { LeftScreen, PhoneBlock } from "./stage/Screens.js";
+import { Toasts } from "./primitives/toasts.js";
 
 export function App() {
   const me = useStore((s) => s.me);
   const config = useStore((s) => s.config);
   const authChecked = useStore((s) => s.authChecked);
   const meId = me?.id;
+  const layout = useLayout();
+  // "Leave office" disconnects without signing out; Rejoin flips it back.
+  const [left, setLeft] = useState(false);
   const [session, setSession] = useState<Session | null>(null);
   const sessionRef = useRef<Session | null>(null);
 
@@ -35,7 +35,7 @@ export function App() {
 
   // Join the space once we know who we are.
   useEffect(() => {
-    if (!meId || !config) return;
+    if (!meId || !config || left) return;
 
     const s = new Session();
     sessionRef.current = s;
@@ -58,30 +58,17 @@ export function App() {
       setSession(null);
       void s.disconnect();
     };
-  }, [meId, config]);
+  }, [meId, config, left]);
 
+  if (layout === "phone") return <PhoneBlock />;
   if (!authChecked) return <div className="boot">Loading…</div>;
   if (!me) return <Login />;
+  if (left) return <LeftScreen onRejoin={() => setLeft(false)} />;
 
   return (
-    <div className="app">
-      <div className="stage">
-        {session && <GameCanvas />}
-        <VideoBubbles />
-        <RemoteAudio />
-        <SelfPreview />
-        <LiveIndicator />
-        <div className="banners">
-          <ConnectionBanner />
-          <AudioBlockedBanner />
-          <MediaBanner session={session} />
-        </div>
-      </div>
-      <aside className="sidebar">
-        <PresenceList />
-        <Chat session={session} />
-      </aside>
-      <Controls session={session} />
-    </div>
+    <>
+      <Office session={session} onLeave={() => setLeft(true)} />
+      <Toasts />
+    </>
   );
 }
