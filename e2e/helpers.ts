@@ -1,4 +1,4 @@
-import type { Browser, BrowserContext, Page } from "@playwright/test";
+import type { Browser, BrowserContext, BrowserContextOptions, Page } from "@playwright/test";
 
 /** The parts of the dev-only globals (client/src/store.ts, client/src/ui/App.tsx)
  *  that the tests read. Kept minimal on purpose. */
@@ -31,9 +31,10 @@ export interface Person {
 }
 
 /** Signs a fresh person in through the dev route and waits until they're in the office.
- *  `init` runs in the page before any app code (e.g. to simulate a device failure). */
-export async function join(browser: Browser, label: string, init?: () => void): Promise<Person> {
-  const context = await browser.newContext();
+ *  `init` runs in the page before any app code (e.g. to simulate a device failure);
+ *  `options` sets up the browser (e.g. a tablet's screen and touch). */
+export async function join(browser: Browser, label: string, init?: () => void, options?: BrowserContextOptions): Promise<Person> {
+  const context = await browser.newContext(options);
   if (init) await context.addInitScript(init);
   const page = await context.newPage();
   const name = `${label}-${Math.random().toString(36).slice(2, 7)}`;

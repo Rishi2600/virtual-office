@@ -41,7 +41,7 @@ function QualityDot({ quality }: { quality: CallQuality }) {
     quality.relayed ? "via relay" : null,
   ].filter(Boolean);
   const text = parts.join(", ");
-  return <span className="tile-quality" data-quality={quality.level} aria-label={text} title={text} />;
+  return <span className="tile-quality" role="img" data-quality={quality.level} aria-label={text} title={text} />;
 }
 
 /** One person in the huddle bar. */

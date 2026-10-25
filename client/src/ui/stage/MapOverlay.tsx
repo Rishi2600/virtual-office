@@ -94,7 +94,7 @@ export function MapOverlay() {
       })}
       <div className="private-hint" ref={hint} hidden>
         <Lock size={15} />
-        Private conversation: they've locked their huddle
+        <span className="private-hint-text" />
       </div>
     </div>
   );
@@ -110,16 +110,24 @@ function placePrivateHint(el: HTMLDivElement | null, people: Record<string, { x:
   const s = useStore.getState();
   const me = s.sessionId ? people[s.sessionId] : undefined;
   const myGroup = s.sessionId ? s.players[s.sessionId]?.lockGroup : "";
-  let best: { x: number; y: number; d: number } | null = null;
+  let best: { x: number; y: number; d: number; group: string } | null = null;
   if (me) {
     for (const p of Object.values(s.players)) {
       if (!p.lockGroup || p.lockGroup === myGroup || p.isSelf || s.peers[p.sessionId]) continue;
       const at = people[p.sessionId];
       if (!at?.visible) continue;
       const d = Math.hypot(at.wx - me.wx, at.wy - me.wy);
-      if (d <= PROXIMITY_ENTER && (!best || d < best.d)) best = { x: at.x, y: at.y, d };
+      if (d <= PROXIMITY_ENTER && (!best || d < best.d)) best = { x: at.x, y: at.y, d, group: p.lockGroup };
     }
   }
   el.hidden = !best;
-  if (best) el.style.transform = `translate3d(${Math.round(best.x)}px, ${Math.round(best.y - HEAD_PX * zoom)}px, 0) translate(-50%, -100%)`;
+  if (!best) return;
+  const names = Object.values(s.players)
+    .filter((p) => p.lockGroup === best.group)
+    .map((p) => p.name)
+    .sort();
+  const text = `Private conversation (${names.join(", ")})`;
+  const span = el.querySelector(".private-hint-text");
+  if (span && span.textContent !== text) span.textContent = text;
+  el.style.transform = `translate3d(${Math.round(best.x)}px, ${Math.round(best.y - HEAD_PX * zoom)}px, 0) translate(-50%, -100%)`;
 }

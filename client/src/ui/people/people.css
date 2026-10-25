@@ -63,7 +63,7 @@
 .finder-who { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .finder-who b { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .finder-who span { font-size: var(--fs-xs); color: var(--text-muted); }
-.finder-look { display: grid; place-items: center; width: 28px; height: 28px; border: 0; border-radius: var(--r-sm); background: transparent; color: var(--text-muted); }
+.finder-look { display: grid; place-items: center; width: 28px; height: 28px; border-radius: var(--r-sm); color: var(--text-muted); cursor: pointer; }
 .finder-look:hover { background: var(--surface-hover); color: var(--text); }
 .finder-walk { color: var(--text-muted); visibility: hidden; }
 .finder-row.on .finder-walk { visibility: visible; color: var(--accent); }

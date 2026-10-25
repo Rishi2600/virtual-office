@@ -42,6 +42,7 @@ function options(devices: MediaDeviceInfo[], noun: string) {
 /** A live input level for your microphone. Reads the volume only; nothing is kept. */
 function MicLevel({ stream }: { stream: MediaStream | null }) {
   const bar = useRef<HTMLElement>(null);
+  const meterEl = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!stream?.getAudioTracks().length) return;
     const ac = new AudioContext();
@@ -57,6 +58,9 @@ function MicLevel({ stream }: { stream: MediaStream | null }) {
       for (const v of buf) sum += v * v;
       const level = Math.min(1, Math.sqrt(sum / buf.length) * 6);
       if (bar.current) bar.current.style.width = `${Math.round(level * 100)}%`;
+      // For screen readers, in steps of 10 so it doesn't change every frame.
+      const now = String(Math.round(level * 10) * 10);
+      if (meterEl.current && meterEl.current.getAttribute("aria-valuenow") !== now) meterEl.current.setAttribute("aria-valuenow", now);
       raf = requestAnimationFrame(tick);
     };
     tick();
@@ -67,7 +71,7 @@ function MicLevel({ stream }: { stream: MediaStream | null }) {
     };
   }, [stream]);
   return (
-    <div className="level" role="meter" aria-label="Microphone level">
+    <div className="level" ref={meterEl} role="meter" aria-label="Microphone level" aria-valuemin={0} aria-valuemax={100} aria-valuenow={0}>
       <i ref={bar} />
     </div>
   );

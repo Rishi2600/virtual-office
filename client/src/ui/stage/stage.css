@@ -35,7 +35,8 @@
 
 /* -------------------------------------------------------------- stage */
 .stage { position: relative; overflow: hidden; min-width: 0; background: #0b0d12; }
-.game-host { position: absolute; inset: 0; outline: none; }
+/* touch-action: the map handles taps and pinches itself; the page mustn't scroll or zoom. */
+.game-host { position: absolute; inset: 0; outline: none; touch-action: none; }
 .game-host:focus-visible { box-shadow: inset 0 0 0 2px var(--accent); }
 
 .banners {

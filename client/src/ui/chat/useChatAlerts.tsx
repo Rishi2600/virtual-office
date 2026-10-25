@@ -1,7 +1,9 @@
 import { useEffect } from "react";
 import { useStore } from "../../store.js";
 import { usePrefs } from "../../prefs.js";
+import { UserMinus, UserPlus } from "lucide-react";
 import { chime } from "../sounds.js";
+import { toast } from "../primitives/toasts.js";
 import { isTyping } from "../stage/Dock.js";
 
 const TITLE = "Lamports";
@@ -9,6 +11,7 @@ const TITLE = "Lamports";
 /**
  * Everything that tells you about chat while you're looking elsewhere:
  * - the unread count in the tab title, "(3) Lamports";
+ * - a toast when someone joins or leaves your huddle;
  * - a chime (only if Sounds is on) for messages and for someone joining you;
  * - a desktop notification (only if turned on in Settings) while the tab is in
  *   the background. It says who wrote and where, but not what: the message
@@ -33,7 +36,9 @@ export function useChatAlerts(): void {
         if (line === prev.chat[prev.chat.length - 1]) return;
 
         if (line.kind === "sys") {
-          if (line.text.endsWith("joined your huddle")) chime("join");
+          const joined = line.text.endsWith("joined your huddle");
+          toast({ text: line.text, icon: joined ? <UserPlus size={16} /> : <UserMinus size={16} /> }, 3000);
+          if (joined) chime("join");
           return;
         }
         if (line.from === s.sessionId) return;

@@ -49,8 +49,10 @@ export function FinderDialog() {
         s.set({ dialog: s.dialog === "finder" ? null : "finder" });
       }
     };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    // Capture phase: the chat box stops key events from bubbling (so typing
+    // never moves you), and Ctrl K should still work from there.
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
   }, []);
 
   const results = useMemo(
@@ -120,18 +122,19 @@ export function FinderDialog() {
                 <span>{presence.text}</span>
               </span>
               <PresenceIcons presence={presence} size={14} />
-              <button
-                type="button"
+              {/* Mouse shortcut for "just look"; keyboards use Shift+Enter (an
+                  option can't contain a button, so it's hidden from assistive tech). */}
+              <span
                 className="finder-look"
-                aria-label={`Look at ${p.name}`}
-                title="Look (Shift+Enter)"
+                aria-hidden
+                title="Just look (Shift+Enter)"
                 onClick={(e) => {
                   e.stopPropagation();
                   go(p.sessionId, false);
                 }}
               >
                 <Eye size={15} />
-              </button>
+              </span>
               <Footprints size={15} className="finder-walk" aria-hidden />
             </li>
           );

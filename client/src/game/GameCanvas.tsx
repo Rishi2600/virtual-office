@@ -90,9 +90,44 @@ export function GameCanvas() {
       wheel = 0;
     };
     el.addEventListener("wheel", onWheel, { passive: false });
+
+    // Two-finger pinch on a tablet zooms by the same steps.
+    const touches = new Map<number, { x: number; y: number }>();
+    let pinchFrom = 0;
+    const spread = () => {
+      const [a, b] = [...touches.values()];
+      return a && b ? Math.hypot(a.x - b.x, a.y - b.y) : 0;
+    };
+    const onDown = (e: PointerEvent) => {
+      if (e.pointerType !== "touch") return;
+      touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (touches.size === 2) pinchFrom = spread();
+    };
+    const onMove = (e: PointerEvent) => {
+      if (!touches.has(e.pointerId)) return;
+      touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (touches.size !== 2 || !pinchFrom) return;
+      const ratio = spread() / pinchFrom;
+      if (ratio > 1.25 || ratio < 0.8) {
+        sceneBus.send({ type: "zoom", step: ratio > 1 ? 1 : -1 });
+        pinchFrom = spread();
+      }
+    };
+    const onUp = (e: PointerEvent) => {
+      touches.delete(e.pointerId);
+      if (touches.size < 2) pinchFrom = 0;
+    };
+    el.addEventListener("pointerdown", onDown);
+    el.addEventListener("pointermove", onMove);
+    el.addEventListener("pointerup", onUp);
+    el.addEventListener("pointercancel", onUp);
     return () => {
       observer.disconnect();
       el.removeEventListener("wheel", onWheel);
+      el.removeEventListener("pointerdown", onDown);
+      el.removeEventListener("pointermove", onMove);
+      el.removeEventListener("pointerup", onUp);
+      el.removeEventListener("pointercancel", onUp);
     };
   }, []);
 
@@ -102,6 +137,10 @@ export function GameCanvas() {
       ref={host}
       tabIndex={0}
       data-map-focus
+      // "application": the map handles its own keys (arrows walk), so screen
+      // readers pass them through instead of using them to read the page.
+      role="application"
+      aria-roledescription="map"
       aria-label="Office map. Move with the arrow keys or W A S D."
     />
   );
