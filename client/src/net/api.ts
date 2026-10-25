@@ -108,3 +108,9 @@ export async function fetchRealtimeToken(): Promise<string> {
   const { token } = await request("/api/rt-token").then(json<{ token: string }>);
   return token;
 }
+
+/** ICE servers for this signed-in user (STUN, plus short-lived TURN credentials
+ *  when the server has TURN configured) and how long they stay valid. */
+export async function fetchIceServers(): Promise<{ iceServers: RTCIceServer[]; ttlSec: number }> {
+  return request("/api/ice").then(json<{ iceServers: RTCIceServer[]; ttlSec: number }>);
+}

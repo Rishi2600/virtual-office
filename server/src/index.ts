@@ -89,7 +89,8 @@ export async function startServer(): Promise<RunningServer> {
       microsoftAuth: microsoftConfigured(),
       githubAuth: githubConfigured(),
       devAuth: env.devAuth,
-      iceServers: env.iceServers.flatMap((s) => s.urls),
+      stun: env.stunUrls,
+      turn: env.turnUrls.length ? env.turnUrls : "off",
     },
     "virtual office server listening",
   );

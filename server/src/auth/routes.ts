@@ -6,6 +6,7 @@ import { env, githubConfigured, microsoftConfigured } from "../env.js";
 import { authLog } from "../log.js";
 import type { Repository, UserRecord } from "../db/index.js";
 import { signRealtimeToken, signSessionToken, verifyToken } from "./jwt.js";
+import { iceServersFor } from "./turn.js";
 
 const COOKIE = "vo_session";
 
@@ -243,11 +244,21 @@ export function createAuthRouter(repo: Repository): Router {
     res.json({ token: signRealtimeToken(user), expiresIn: env.realtimeTtlSec });
   });
 
-  /** Public client bootstrap: ICE servers come from env so TURN can be added
-   *  later with no client code change. */
+  /** ICE servers for the signed-in user, with fresh short-lived TURN
+   *  credentials when a TURN server is configured. Behind sign-in so nobody can
+   *  use the relay anonymously (it would otherwise be a free open relay). */
+  router.get("/api/ice", async (req, res) => {
+    const claims = currentUser(req);
+    if (!claims) return res.status(401).json({ error: "unauthenticated" });
+    const user = await repo.getUser(claims.sub);
+    if (!user) return res.status(401).json({ error: "unknown_user" });
+    res.set("Cache-Control", "no-store").json(iceServersFor(user.id));
+  });
+
+  /** Public client bootstrap (what the sign-in screen needs). No ICE servers
+   *  here: those come from /api/ice after sign-in. */
   router.get("/api/config", async (_req, res) => {
     res.json({
-      iceServers: env.iceServers,
       microsoftEnabled: microsoftConfigured(),
       githubEnabled: githubConfigured(),
       devAuthEnabled: env.devAuth,

@@ -17,7 +17,6 @@ export interface Me {
 }
 
 export interface AppConfig {
-  iceServers: RTCIceServer[];
   microsoftEnabled: boolean;
   githubEnabled: boolean;
   devAuthEnabled: boolean;

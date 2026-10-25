@@ -1,6 +1,7 @@
-# Single-VPS deployment: the app plus a Postgres for it.
+# Single-VPS deployment: the app, its Postgres, and a TURN relay (coturn).
 # Put nginx or Caddy in front for TLS — browsers only grant camera, microphone
-# and screen capture on a secure origin.
+# and screen capture on a secure origin. The TURN relay is reached directly,
+# not through the proxy; see README "TURN" for the firewall ports to open.
 services:
   db:
     image: postgres:17-alpine
@@ -45,12 +46,56 @@ services:
       GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
       GITHUB_CALLBACK_URL: ${GITHUB_CALLBACK_URL:-http://localhost:2567/auth/github/callback}
       ALLOWED_EMAIL_DOMAIN: ${ALLOWED_EMAIL_DOMAIN:-}
-      # NAT traversal. Add TURN here when people on restrictive networks
-      # can't connect — no code change needed.
+      # NAT traversal. STUN finds people's public addresses; TURN relays calls
+      # for people whose network blocks direct connections. The app signs
+      # short-lived TURN credentials with TURN_SECRET, which coturn shares.
       STUN_URLS: ${STUN_URLS:-stun:stun.l.google.com:19302,stun:stun1.l.google.com:19302}
-      TURN_URLS: ${TURN_URLS:-}
-      TURN_USERNAME: ${TURN_USERNAME:-}
-      TURN_CREDENTIAL: ${TURN_CREDENTIAL:-}
+      TURN_URLS: ${TURN_URLS:?set TURN_URLS in .env, e.g. turn:your-domain:3478?transport=udp,turn:your-domain:3478?transport=tcp}
+      TURN_SECRET: ${TURN_SECRET:?set TURN_SECRET in .env (openssl rand -hex 32)}
+      TURN_TTL_SEC: ${TURN_TTL_SEC:-86400}
+
+  # TURN relay for people whose network blocks direct peer-to-peer calls.
+  # Calls stay end-to-end encrypted through it; it only forwards packets.
+  turn:
+    image: coturn/coturn:4.18.0-alpine
+    restart: unless-stopped
+    # Host networking: coturn needs the server's public IP and a whole UDP port
+    # range; publishing that range through Docker's NAT is slow and fragile.
+    network_mode: host
+    command:
+      - -n # no config file: everything is below
+      - --listening-port=3478 # UDP and TCP
+      - --min-port=49152 # relay ports, one per relayed call leg:
+      - --max-port=49352 # open these UDP ports in the firewall too
+      - --realm=${TURN_REALM:-virtual-office}
+      # Only credentials signed by the app with the shared secret are accepted.
+      - --use-auth-secret
+      - --static-auth-secret=${TURN_SECRET:?set TURN_SECRET in .env (openssl rand -hex 32)}
+      - --fingerprint
+      - --stale-nonce=600
+      # Limits so one account (or a leaked credential) can't hog the relay.
+      - --user-quota=12
+      - --total-quota=200
+      # Never relay into private or special networks: the relay must not be a
+      # way into this server's internal services or a cloud metadata endpoint.
+      - --no-multicast-peers
+      - --denied-peer-ip=0.0.0.0-0.255.255.255
+      - --denied-peer-ip=10.0.0.0-10.255.255.255
+      - --denied-peer-ip=100.64.0.0-100.127.255.255
+      - --denied-peer-ip=127.0.0.0-127.255.255.255
+      - --denied-peer-ip=169.254.0.0-169.254.255.255
+      - --denied-peer-ip=172.16.0.0-172.31.255.255
+      - --denied-peer-ip=192.0.0.0-192.0.0.255
+      - --denied-peer-ip=192.168.0.0-192.168.255.255
+      - --denied-peer-ip=198.18.0.0-198.19.255.255
+      - --denied-peer-ip=::1
+      - --denied-peer-ip=fc00::-fdff:ffff:ffff:ffff:ffff:ffff:ffff:ffff
+      - --denied-peer-ip=fe80::-febf:ffff:ffff:ffff:ffff:ffff:ffff:ffff
+      # Plain UDP/TCP on 3478 for now; TURN over TLS on 443 is an add-on (README).
+      - --no-tls
+      - --log-file=stdout
+      # On a cloud host whose public IP isn't on the network interface (AWS,
+      # GCP, Azure), also add:  - --external-ip=PUBLIC_IP/PRIVATE_IP
 
 volumes:
   db-data:

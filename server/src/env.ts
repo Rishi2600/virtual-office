@@ -39,35 +39,7 @@ function int(name: string, d: number): number {
 const DEV_JWT_SECRET = "dev-only-insecure-secret-change-me";
 const MIN_JWT_SECRET_LENGTH = 32;
 
-export interface IceServer {
-  urls: string[];
-  username?: string;
-  credential?: string;
-}
-
-/**
- * ICE configuration is assembled from env, never hardcoded, so a TURN server can
- * be added later (coturn or hosted) by setting TURN_URLS/TURN_USERNAME/
- * TURN_CREDENTIAL — no code change, no redeploy of the client bundle.
- */
-function buildIceServers(): IceServer[] {
-  const servers: IceServer[] = [];
-  const stun = list(process.env.STUN_URLS);
-  servers.push({
-    urls: stun.length
-      ? stun
-      : ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"],
-  });
-  const turn = list(process.env.TURN_URLS);
-  if (turn.length) {
-    servers.push({
-      urls: turn,
-      username: process.env.TURN_USERNAME,
-      credential: process.env.TURN_CREDENTIAL,
-    });
-  }
-  return servers;
-}
+const DEFAULT_STUN_URLS = ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"];
 
 export const env = {
   nodeEnv: str(process.env.NODE_ENV, "production"),
@@ -117,11 +89,38 @@ export const env = {
   databaseUrl: process.env.DATABASE_URL ?? "",
   logLevel: str(process.env.LOG_LEVEL, "info"),
 
-  iceServers: buildIceServers(),
+  /**
+   * ICE: how browsers find a network path to each other (see docs). STUN is
+   * public and harmless. TURN credentials are never static: when TURN_URLS is
+   * set, each signed-in user gets short-lived ones signed with TURN_SECRET, the
+   * secret coturn also holds (auth/turn.ts). No client rebuild to change these.
+   */
+  stunUrls: list(process.env.STUN_URLS).length ? list(process.env.STUN_URLS) : DEFAULT_STUN_URLS,
+  turnUrls: list(process.env.TURN_URLS),
+  turnSecret: process.env.TURN_SECRET ?? "",
+  /** How long a TURN credential works. Clients refresh at half of this. */
+  turnTtlSec: int("TURN_TTL_SEC", 24 * 3600),
 };
 
 export function assertSafeConfig(): void {
   const found = [...problems];
+
+  // TURN: both halves or neither, and no leftovers from the old static scheme.
+  if (env.turnUrls.length && !env.turnSecret) {
+    found.push("TURN_URLS is set but TURN_SECRET isn't (the secret coturn uses to check credentials)");
+  }
+  if (env.turnSecret && !env.turnUrls.length) {
+    found.push("TURN_SECRET is set but TURN_URLS isn't");
+  }
+  // The coturn image's entrypoint passes every argument through the shell's
+  // `eval`, so a secret containing $, quotes or backticks would be mangled (or
+  // run). Hex from `openssl rand -hex 32` is always safe.
+  if (env.turnSecret && !/^[A-Za-z0-9._-]+$/.test(env.turnSecret)) {
+    found.push("TURN_SECRET may only contain letters, digits, '.', '_' and '-' (use: openssl rand -hex 32)");
+  }
+  if (process.env.TURN_USERNAME || process.env.TURN_CREDENTIAL) {
+    found.push("TURN_USERNAME/TURN_CREDENTIAL are no longer used: set TURN_SECRET instead (see .env.example)");
+  }
 
   if (env.isProd) {
     // Asking for dev sign-in outside development is a misconfiguration worth
@@ -141,6 +140,11 @@ export function assertSafeConfig(): void {
     if (!microsoftConfigured() && !githubConfigured()) {
       found.push(
         "configure at least one sign-in provider: MICROSOFT_CLIENT_ID/MICROSOFT_CLIENT_SECRET or GITHUB_CLIENT_ID/GITHUB_CLIENT_SECRET",
+      );
+    }
+    if (env.turnSecret && env.turnSecret.length < MIN_JWT_SECRET_LENGTH) {
+      found.push(
+        `TURN_SECRET must be at least ${MIN_JWT_SECRET_LENGTH} characters (generate one with: openssl rand -hex 32)`,
       );
     }
     if (microsoftConfigured() && env.microsoftTenant === "common") {

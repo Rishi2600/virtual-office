@@ -5,6 +5,9 @@
 #   npm run db:reset   wipe all data and start fresh
 #   npm run db:psql    open a SQL shell on the dev database
 #
+#   npm run turn:up    start a local TURN relay too (coturn), for testing relayed calls
+#   npm run turn:down  stop it
+#
 # Two databases: virtual_office (what `npm run dev` uses, via DATABASE_URL) and
 # virtual_office_test (what the tests use, via TEST_DATABASE_URL), so running
 # the tests never touches your dev data.
@@ -33,6 +36,27 @@ services:
       interval: 2s
       timeout: 5s
       retries: 15
+
+  # Local TURN relay, only when asked for (profile "turn"): `npm run turn:up`.
+  # Same as production except that relaying on localhost is allowed, because
+  # both test browsers live on this machine.
+  turn:
+    profiles: ["turn"]
+    image: coturn/coturn:4.18.0-alpine
+    network_mode: host
+    command:
+      - -n
+      - --listening-port=3478
+      - --min-port=49152
+      - --max-port=49252
+      - --realm=virtual-office
+      - --use-auth-secret
+      - --static-auth-secret=dev-only-turn-secret-change-me-0000000
+      - --fingerprint
+      - --allow-loopback-peers
+      - --no-multicast-peers
+      - --no-tls
+      - --log-file=stdout
 
 volumes:
   dev-db-data:

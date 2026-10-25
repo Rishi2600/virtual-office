@@ -87,7 +87,7 @@ export class PeerManager {
 
   constructor(
     private readonly room: Room,
-    private readonly iceServers: RTCIceServer[],
+    private iceServers: RTCIceServer[],
   ) {
     this.statsTimer = setInterval(() => void this.sampleQuality(), STATS_INTERVAL_MS);
   }
@@ -269,6 +269,17 @@ export class PeerManager {
       peer.audioTransceiver = pc.addTransceiver("audio", { direction: "recvonly" });
       peer.videoTransceiver = pc.addTransceiver("video", { direction: "recvonly" });
       this.applyLocalMedia(peer);
+    }
+  }
+
+  /** Fresh ICE servers (TURN credentials expire): used for new calls, and given
+   *  to live ones so a later ICE restart doesn't use expired credentials. */
+  setIceServers(iceServers: RTCIceServer[]): void {
+    this.iceServers = iceServers;
+    for (const peer of this.peers.values()) {
+      try {
+        peer.pc.setConfiguration({ ...peer.pc.getConfiguration(), iceServers });
+      } catch { /* closed */ }
     }
   }
 

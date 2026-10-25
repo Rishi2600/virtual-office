@@ -14,7 +14,7 @@ import {
 import { useStore, type PlayerView } from "../store.js";
 import { PeerManager } from "../webrtc/PeerManager.js";
 import { ensureMicrophone } from "../webrtc/media.js";
-import { fetchRealtimeToken } from "./api.js";
+import { fetchIceServers, fetchRealtimeToken } from "./api.js";
 
 const WS_URL: string =
   (import.meta.env.VITE_SERVER_WS as string | undefined) ??
@@ -45,6 +45,8 @@ export class Session {
   private myRoom: Room<OfficeState> | null = null;
   private reconnectionToken: string | null = null;
   private leavingIntentionally = false;
+  private iceServers: RTCIceServer[] = [];
+  private iceRefreshTimer: ReturnType<typeof setTimeout> | null = null;
   private disposed = false;
 
   get room(): Room<OfficeState> | null {
@@ -61,6 +63,7 @@ export class Session {
     // opt-in and only acquired when the user clicks for it.
     await ensureMicrophone();
 
+    await this.refreshIceServers();
     const token = await fetchRealtimeToken();
     const room = await this.client.joinOrCreate<OfficeState>("office", { token }, OfficeState);
     this.adopt(room);
@@ -81,8 +84,7 @@ export class Session {
 
     // A reconnect hands us a new Room, so the peer manager is rebuilt against it.
     this.peers?.closeAll();
-    const iceServers = useStore.getState().config?.iceServers ?? [];
-    this.peers = new PeerManager(room, iceServers);
+    this.peers = new PeerManager(room, this.iceServers);
     this.peers.setLocalStream(useStore.getState().localStream);
 
     room.onMessage(S2C.ProximityEnter, (m: ProximityEnterMessage) => {
@@ -144,6 +146,25 @@ export class Session {
     useStore.getState().set({ players });
   }
 
+  /**
+   * TURN credentials expire (TURN_TTL_SEC), so they're fetched on join and
+   * refreshed at half their lifetime; live calls get them too, for any later
+   * ICE restart. A failed refresh keeps the old ones and tries again soon.
+   */
+  private async refreshIceServers(): Promise<void> {
+    if (this.iceRefreshTimer) clearTimeout(this.iceRefreshTimer);
+    let nextMs = 60_000;
+    try {
+      const { iceServers, ttlSec } = await fetchIceServers();
+      this.iceServers = iceServers;
+      this.peers?.setIceServers(iceServers);
+      nextMs = (ttlSec * 1000) / 2;
+    } catch (err) {
+      console.warn("[net] could not refresh ICE servers", err);
+    }
+    if (!this.disposed) this.iceRefreshTimer = setTimeout(() => void this.refreshIceServers(), nextMs);
+  }
+
   // ---------------------------------------------------------------- reconnect
   private async handleLeave(code: number): Promise<void> {
     if (this.leavingIntentionally || this.disposed) return;
@@ -182,6 +203,7 @@ export class Session {
 
       // 2. Otherwise start a fresh session (new spawn, same user).
       try {
+        await this.refreshIceServers();
         const token = await fetchRealtimeToken();
         const room = await this.client.joinOrCreate<OfficeState>("office", { token }, OfficeState);
         this.adopt(room);
@@ -217,6 +239,7 @@ export class Session {
 
   async disconnect(): Promise<void> {
     this.disposed = true;
+    if (this.iceRefreshTimer) clearTimeout(this.iceRefreshTimer);
     this.leavingIntentionally = true;
     this.peers?.closeAll();
     this.peers = null;

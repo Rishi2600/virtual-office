@@ -21,6 +21,8 @@
     "db:down": "docker compose -f docker-compose.dev.yml down",
     "db:reset": "docker compose -f docker-compose.dev.yml down -v && npm run db:up",
     "db:psql": "docker compose -f docker-compose.dev.yml exec db psql -U vo virtual_office",
+    "turn:up": "docker compose -f docker-compose.dev.yml --profile turn up -d turn",
+    "turn:down": "docker compose -f docker-compose.dev.yml --profile turn rm -sf turn",
     "lint": "eslint . --max-warnings=0",
     "smoke": "npm -w @vo/server run smoke",
     "gen:tileset": "node scripts/gen-tileset.mjs"
