@@ -179,7 +179,10 @@ export function Dialog({
   testId?: string;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
+  // The latest `open`, for the native close event (see onClose below).
+  const openRef = useRef(open);
   useEffect(() => {
+    openRef.current = open;
     const d = ref.current;
     if (!d) return;
     if (open && !d.open) {
@@ -200,7 +203,13 @@ export function Dialog({
       style={{ width }}
       aria-labelledby={titleId}
       data-testid={testId}
-      onClose={onClose}
+      // The browser fires "close" a moment AFTER d.close(), so when the app
+      // closed this dialog itself (open is already false) it must not call
+      // onClose again: by then another dialog may be open, and it would
+      // close that one instead.
+      onClose={() => {
+        if (openRef.current) onClose();
+      }}
       onCancel={(e) => {
         e.preventDefault();
         onClose();

@@ -62,3 +62,18 @@ test("closing the tab removes you for everyone at once, not after the reconnect 
   await expect(pill).toHaveCount(0, { timeout: 5_000 });
   await alice.context.close();
 });
+
+test("going straight from Settings to the finder leaves the finder open", async ({ browser }) => {
+  const me = await join(browser, "Swapper");
+  people = [me];
+  const page = me.page;
+  await page.getByRole("button", { name: "More" }).click();
+  await page.getByRole("menuitem", { name: "Settings" }).click();
+  await expect(page.getByTestId("settings")).toBeVisible();
+  // The settings dialog's late "close" event used to close the finder again.
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("Control+k");
+  await page.waitForTimeout(500);
+  await expect(page.getByTestId("finder")).toBeVisible();
+  await expect(page.getByTestId("settings")).toBeHidden();
+});
