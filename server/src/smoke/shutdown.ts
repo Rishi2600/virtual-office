@@ -7,6 +7,8 @@
  * Run: npm test (runs after the other server suites).
  */
 import { spawn } from "node:child_process";
+import { rmSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Client } from "colyseus.js";
@@ -25,13 +27,19 @@ function check(label: string, ok: boolean, detail = ""): void {
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const dataFile = path.join(os.tmpdir(), `lamports-shutdown-${process.pid}.json`);
+process.on("exit", () => {
+  rmSync(dataFile, { force: true });
+  rmSync(dataFile + ".tmp", { force: true });
+});
 
 console.log("\ngraceful shutdown\n");
 
 // node itself is the child (no shell in between), so the signal reaches it.
 const child = spawn(process.execPath, ["--import", "tsx", "src/main.ts"], {
   cwd: serverDir,
-  env: { ...process.env, NODE_ENV: "development", DEV_AUTH: "true", PORT: String(PORT), DATABASE_URL: "" },
+  // A throwaway JSON store, never the developer's .data/dev.json.
+  env: { ...process.env, NODE_ENV: "development", DEV_AUTH: "true", PORT: String(PORT), DATABASE_URL: "", DATA_FILE: dataFile },
 });
 let output = "";
 child.stdout.on("data", (c: Buffer) => (output += c.toString()));

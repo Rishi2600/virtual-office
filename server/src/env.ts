@@ -87,6 +87,9 @@ export const env = {
   /** Dev sign-in: on by default in development, impossible anywhere else. */
   devAuth: isDev && bool(process.env.DEV_AUTH, true),
   databaseUrl: process.env.DATABASE_URL ?? "",
+  /** The JSON store's file when there's no DATABASE_URL (default .data/dev.json);
+   *  tests point it at a throwaway file. */
+  dataFile: process.env.DATA_FILE ?? "",
   logLevel: str(process.env.LOG_LEVEL, "info"),
 
   /**

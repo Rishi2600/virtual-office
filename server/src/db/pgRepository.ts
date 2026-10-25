@@ -5,6 +5,7 @@ import {
   DEFAULT_SPACES,
   type Repository,
   type SpaceRecord,
+  type SpotRecord,
   type UpsertUserInput,
   type UserRecord,
 } from "./types.js";
@@ -108,6 +109,26 @@ export class PgRepository implements Repository {
 
   async setAvatar(id: string, look: string): Promise<void> {
     await this.pool.query(`UPDATE users SET avatar = $2 WHERE id = $1`, [id, look]);
+  }
+
+  async getSpot(userId: string, space: string): Promise<{ x: number; y: number } | null> {
+    const { rows } = await this.pool.query<{ x: number; y: number }>(
+      `SELECT x, y FROM user_positions WHERE user_id = $1 AND space = $2`,
+      [userId, space],
+    );
+    return rows[0] ?? null;
+  }
+
+  async saveSpots(space: string, spots: SpotRecord[]): Promise<void> {
+    if (spots.length === 0) return;
+    // One statement for the whole batch, however many people moved.
+    await this.pool.query(
+      `INSERT INTO user_positions (user_id, space, x, y)
+       SELECT u, $1, x, y FROM unnest($2::uuid[], $3::float8[], $4::float8[]) AS t(u, x, y)
+       ON CONFLICT (user_id, space) DO UPDATE
+         SET x = EXCLUDED.x, y = EXCLUDED.y, updated_at = now()`,
+      [space, spots.map((s) => s.userId), spots.map((s) => s.x), spots.map((s) => s.y)],
+    );
   }
 
   async listSpaces(): Promise<SpaceRecord[]> {

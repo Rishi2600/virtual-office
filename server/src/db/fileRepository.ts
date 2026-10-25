@@ -5,6 +5,7 @@ import {
   DEFAULT_SPACES,
   type Repository,
   type SpaceRecord,
+  type SpotRecord,
   type UpsertUserInput,
   type UserRecord,
 } from "./types.js";
@@ -12,6 +13,8 @@ import {
 interface FileShape {
   users: UserRecord[];
   spaces: SpaceRecord[];
+  /** Latest spot per user and space (see Repository.saveSpots). */
+  positions: Array<SpotRecord & { space: string; updatedAt: string }>;
 }
 
 /**
@@ -24,7 +27,7 @@ interface FileShape {
  * so an interrupted write cannot truncate the store.
  */
 export class FileRepository implements Repository {
-  private data: FileShape = { users: [], spaces: [...DEFAULT_SPACES] };
+  private data: FileShape = { users: [], spaces: [...DEFAULT_SPACES], positions: [] };
   private queue: Promise<unknown> = Promise.resolve();
 
   constructor(private readonly file: string) {}
@@ -37,6 +40,7 @@ export class FileRepository implements Repository {
         // Files written before avatars existed have no `avatar` field.
         users: (parsed.users ?? []).map((u) => ({ ...u, avatar: u.avatar ?? "" })),
         spaces: parsed.spaces?.length ? parsed.spaces : [...DEFAULT_SPACES],
+        positions: parsed.positions ?? [],
       };
     } catch {
       await this.flush(); // first run: create the file
@@ -107,6 +111,23 @@ export class FileRepository implements Repository {
     const u = this.data.users.find((x) => x.id === id);
     if (!u) return;
     u.avatar = look;
+    await this.flush();
+  }
+
+  async getSpot(userId: string, space: string): Promise<{ x: number; y: number } | null> {
+    const p = this.data.positions.find((s) => s.userId === userId && s.space === space);
+    return p ? { x: p.x, y: p.y } : null;
+  }
+
+  async saveSpots(space: string, spots: SpotRecord[]): Promise<void> {
+    if (spots.length === 0) return;
+    const updatedAt = new Date().toISOString();
+    for (const spot of spots) {
+      const row = { userId: spot.userId, space, x: spot.x, y: spot.y, updatedAt };
+      const i = this.data.positions.findIndex((s) => s.userId === spot.userId && s.space === space);
+      if (i >= 0) this.data.positions[i] = row;
+      else this.data.positions.push(row);
+    }
     await this.flush();
   }
 

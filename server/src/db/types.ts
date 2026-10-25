@@ -22,6 +22,13 @@ export interface SpaceRecord {
   mapKey: string;
 }
 
+/** Where someone last stood in a space (only the latest spot is kept, no history). */
+export interface SpotRecord {
+  userId: string;
+  x: number;
+  y: number;
+}
+
 export interface UpsertUserInput {
   provider?: string;
   providerId?: string | null;
@@ -39,6 +46,10 @@ export interface Repository {
   touchUser(id: string): Promise<void>;
   /** Saves a look the caller has already validated with parseLook. */
   setAvatar(id: string, look: string): Promise<void>;
+  /** The last saved spot of a user in a space, or null if none. */
+  getSpot(userId: string, space: string): Promise<{ x: number; y: number } | null>;
+  /** Saves (overwrites) the latest spot of each given user in a space, in one go. */
+  saveSpots(space: string, spots: SpotRecord[]): Promise<void>;
   listSpaces(): Promise<SpaceRecord[]>;
   getSpaceBySlug(slug: string): Promise<SpaceRecord | null>;
   /** Readiness probe: rejects if the store can't be reached. Optional because

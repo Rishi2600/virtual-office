@@ -7,15 +7,21 @@
  *
  * Run: npm test
  */
+import { rmSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import dotenv from "dotenv";
+import pg from "pg";
 
 // Tests never touch the developer's database (DATABASE_URL): they use
 // TEST_DATABASE_URL when set (CI's Postgres job, or local `npm run db:up`),
 // otherwise the JSON file. Read .env first so TEST_DATABASE_URL from it counts.
 dotenv.config({ path: path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../.env"), quiet: true });
 process.env.DATABASE_URL = process.env.TEST_DATABASE_URL ?? "";
+// The JSON store gets a fresh throwaway file, never the developer's .data/dev.json.
+const DATA_FILE = path.join(os.tmpdir(), `lamports-integration-${process.pid}.json`);
+process.env.DATA_FILE = DATA_FILE;
 
 process.env.PORT ??= "2588";
 process.env.DEV_AUTH = "true";
@@ -37,6 +43,8 @@ import {
 } from "@vo/shared";
 
 const { startServer } = await import("../index.js");
+// Same module instance as the server's (in-process), to plant a saved spot.
+const { saveSpots, drainSpotSaves } = await import("../rooms/spots.js");
 
 const PORT = Number(process.env.PORT);
 const BASE = `http://localhost:${PORT}`;
@@ -165,6 +173,14 @@ const COL = (tile: number) => tile * TILE_SIZE + TILE_SIZE / 2;
 
 // ------------------------------------------------------------------- the test
 const server = await startServer();
+// Spots are remembered across runs now (user_positions), and this suite signs in
+// the same names every time: start everyone from the spawn points again.
+if (process.env.DATABASE_URL) {
+  const db = new pg.Client({ connectionString: process.env.DATABASE_URL });
+  await db.connect();
+  await db.query("DELETE FROM user_positions");
+  await db.end();
+}
 console.log(`\nLamports integration test (port ${PORT})\n`);
 
 const alice = await joinAs("Alice");
@@ -435,9 +451,18 @@ console.log("\navatars");
   await dana.room.leave(true);
   await waitFor("Dana removed", () => !alice.room.state.players.has(dana.room.sessionId));
   const back = await joinAs("Dana");
-  check("rejoining soon after puts you back where you were", Math.hypot(self(back).x - spot.x, self(back).y - spot.y) < 1, `${JSON.stringify(spot)} -> ${self(back).x},${self(back).y}`);
+  check("leaving and coming back puts you where you were (saved spot)", Math.hypot(self(back).x - spot.x, self(back).y - spot.y) < 1, `${JSON.stringify(spot)} -> ${self(back).x},${self(back).y}`);
   await back.room.leave(true);
   await waitFor("Dana removed again", () => !alice.room.state.players.has(back.room.sessionId));
+
+  // A saved spot the map no longer allows (now inside a wall) falls back to a spawn point.
+  const danaId = self(back).userId;
+  saveSpots("office", [{ userId: danaId, x: 16, y: 16 }]); // the top-left corner: wall
+  await drainSpotSaves();
+  const walled = await joinAs("Dana");
+  check("a saved spot inside a wall gives a spawn point instead", Math.hypot(self(walled).x - 16, self(walled).y - 16) > TILE_SIZE, `${self(walled).x},${self(walled).y}`);
+  await walled.room.leave(true);
+  await waitFor("Dana removed a third time", () => !alice.room.state.players.has(walled.room.sessionId));
 }
 
 // -- 10. reconnect ----------------------------------------------------------
@@ -485,6 +510,8 @@ check("a consented leave removes the player immediately", alice.room.state.playe
 // ---------------------------------------------------------------------- done
 await alice.room.leave(true);
 await server.close();
+rmSync(DATA_FILE, { force: true });
+rmSync(DATA_FILE + ".tmp", { force: true });
 
 console.log(`\n${passed} passed, ${failures.length} failed`);
 if (failures.length) {

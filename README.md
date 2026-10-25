@@ -162,7 +162,11 @@ Every push runs lint, typecheck, build, `npm test`, `npm run smoke` and the brow
 Boots the real server in-process and drives it with real Colyseus clients over real WebSockets,
 covering: auth handshake rejection, movement, collision, wall-sliding, proximity enter/exit,
 hysteresis, signaling authorization, chat scoping, conversation locking, focus-mode suppression,
-reconnect-with-position, and clean leave. Run it after touching anything in `shared/` or `server/`.
+reconnect-with-position, saved spots, and clean leave. Then the startup-guard, shutdown and
+**restart** suites: the restart one runs the real server twice over the same store and checks
+everyone comes back to their spot, after a clean restart (SIGTERM) and after a crash (SIGKILL,
+which waits ~32 s for the periodic save). The suites use a throwaway JSON file, or
+`TEST_DATABASE_URL`, never your dev data. Run it after touching anything in `shared/` or `server/`.
 
 ---
 
@@ -242,7 +246,8 @@ with zero setup. Set it and it uses PostgreSQL (13 or newer) instead, with the s
 DATABASE_URL=postgres://vo:vo@localhost:5432/virtual_office
 ```
 
-Only users and space metadata are stored. Nothing about calls is persisted.
+Only users, space metadata and each person's latest spot on the map are stored. Nothing about
+calls is persisted.
 
 The schema is managed by versioned migrations (`server/src/db/migrations.ts`) that run
 automatically at startup: each one once, in order, in its own transaction. No database extensions
@@ -379,9 +384,14 @@ proximity graph, so a chain A–B–C is one conversation rather than two.
 session at the same position — no page reload. Past that window it rejoins as a new session, and
 it never gives up: it keeps retrying (every 10 s at most, and at once when the network is back)
 until it's in again. Peers see you greyed out and your calls tear down immediately rather than
-freezing. Closing or reloading the tab leaves at once (no 30-second ghost), and coming back within
-10 minutes puts you where you were (kept in server memory only). New arrivals spawn out of earshot
-of everyone, so nobody lands inside someone else's conversation.
+freezing. Closing or reloading the tab leaves at once (no 30-second ghost).
+
+**Your spot is kept**, even across a server restart or crash: you always come back where you last
+stood, so after a restart everyone is where they were and conversations re-form by themselves.
+The server saves each person's latest spot when they leave, every 30 seconds for anyone who moved
+(so a crash loses at most 30 s of walking), and at shutdown. If the map has changed and your spot
+is now inside a wall, you get a spawn point. First-time arrivals spawn out of earshot of everyone,
+so nobody lands inside someone else's conversation.
 
 ### Notable choices
 
@@ -413,8 +423,8 @@ of everyone, so nobody lands inside someone else's conversation.
 - **"Who's speaking"** (the green rings and bars) is worked out in your browser from the live volume
   level only; no audio is kept or sent anywhere for it.
 - **Stored data** is limited to user profile (name, email, profile picture URL, the avatar you built,
-  timestamps) and space
-  metadata.
+  timestamps), **where you last stood in the office** (your latest spot only, overwritten each time,
+  no history; so a restart puts you back), and space metadata.
 
 The guarantee is asserted in a comment at the top of `client/src/webrtc/PeerManager.ts`, next to
 the only media APIs the app calls.

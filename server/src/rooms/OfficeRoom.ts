@@ -16,6 +16,10 @@ import {
   TICK_MS,
   applyInput,
   isPolite,
+  boxHitsSolid,
+  PLAYER_FEET_OFFSET,
+  PLAYER_HALF_H,
+  PLAYER_HALF_W,
   parseLook,
   resolveLook,
   type CollisionGrid,
@@ -32,6 +36,8 @@ import { proximityLog, wsLog } from "../log.js";
 import { loadMap } from "../maps/loadMap.js";
 import { ProximityTracker, type ProximityCandidate } from "./proximity.js";
 import { SignalingRelay } from "./signaling.js";
+import { loadSpot, saveSpots } from "./spots.js";
+import type { SpotRecord } from "../db/index.js";
 
 /** Simulated-time allowance per client, to bound how far one burst of input can
  *  move you. Well-behaved clients never hit this; it only binds if someone
@@ -43,16 +49,12 @@ interface InputBudget {
   last: number;
 }
 
-/** Coming back within this long puts you where you were (a reload, a laptop
- *  lid, a crash), instead of at a spawn point. */
-const LAST_SPOT_MS = 10 * 60 * 1000;
+/** How often the spots of people who moved are saved (see rooms/spots.ts):
+ *  a crash loses at most this much walking. */
+const SPOT_SAVE_MS = 30_000;
 
-/**
- * Where each person last stood, per map: in memory only (a server restart
- * forgets it; positions are deliberately not stored in the database).
- * Module-level so it outlives the room, which is disposed when it empties.
- */
-const lastSpots = new Map<string, { x: number; y: number; at: number }>();
+/** What onAuth hands to onJoin: who you are, and where you last stood. */
+type JoinAuth = Claims & { spot: { x: number; y: number } | null };
 
 /**
  * One Colyseus room == one virtual office space == one authoritative unit of
@@ -66,6 +68,8 @@ export class OfficeRoom extends Room<OfficeState> {
   private grid!: CollisionGrid;
   private spawns: Array<{ x: number; y: number }> = [];
   private spawnCursor = 0;
+  /** The last spot saved per user, so only people who moved are saved again. */
+  private readonly savedSpots = new Map<string, { x: number; y: number }>();
   private readonly proximity = new ProximityTracker();
   private signaling!: SignalingRelay;
   private readonly budgets = new Map<string, InputBudget>();
@@ -85,6 +89,7 @@ export class OfficeRoom extends Room<OfficeState> {
 
     this.setPatchRate(TICK_MS);
     this.setSimulationInterval(() => this.tick(), TICK_MS);
+    this.clock.setInterval(() => this.saveMovedSpots(), SPOT_SAVE_MS);
 
     this.signaling = new SignalingRelay(this, this.proximity);
 
@@ -107,27 +112,32 @@ export class OfficeRoom extends Room<OfficeState> {
    * admitted to the room — so an unauthenticated socket never reaches game
    * state, and checking auth only on the initial HTTP request is not enough.
    */
-  onAuth(_client: Client, options: { token?: string }, context: AuthContext): Claims {
+  async onAuth(_client: Client, options: { token?: string }, context: AuthContext): Promise<JoinAuth> {
     const token = options?.token ?? context?.token;
     const claims = verifyToken(token, "realtime");
     if (!claims) {
       wsLog.warn({ ip: context?.ip }, "join rejected: invalid or expired realtime token");
       throw new ServerError(401, "unauthorized");
     }
-    return claims;
+    // Looked up here (onAuth may be async; onJoin stays synchronous).
+    return { ...claims, spot: await loadSpot(claims.sub, this.state.mapKey) };
   }
 
   // ------------------------------------------------------------- membership
-  onJoin(client: Client, _options: unknown, auth: Claims): void {
+  onJoin(client: Client, _options: unknown, auth: JoinAuth): void {
     const player = new Player();
     player.userId = auth.sub;
     player.name = auth.name || auth.email;
     player.picture = auth.picture ?? "";
     player.avatar = resolveLook(auth.avatar, auth.sub);
 
-    const spot = this.takeLastSpot(auth.sub) ?? this.pickSpawn();
+    // Back where you last stood, always (owner decision), even if that's in
+    // someone's conversation: after a restart, that's the point. Only a spot
+    // that is no longer walkable (the map changed) falls back to a spawn.
+    const spot = auth.spot && this.isStandable(auth.spot) ? auth.spot : this.pickSpawn();
     player.x = spot.x;
     player.y = spot.y;
+    this.savedSpots.set(auth.sub, { x: spot.x, y: spot.y });
 
     this.state.players.set(client.sessionId, player);
     this.budgets.set(client.sessionId, { remaining: BUDGET_CAP_SEC, last: Date.now() });
@@ -170,6 +180,10 @@ export class OfficeRoom extends Room<OfficeState> {
   }
 
   onDispose(): void {
+    // Anyone still here (shutdown, or a reconnect window cut short): keep their spot.
+    const left: SpotRecord[] = [];
+    this.state.players.forEach((p) => left.push({ userId: p.userId, x: p.x, y: p.y }));
+    saveSpots(this.state.mapKey, left);
     wsLog.info({ roomId: this.roomId }, "room disposed");
   }
 
@@ -195,22 +209,32 @@ export class OfficeRoom extends Room<OfficeState> {
     return best;
   }
 
-  private spotKey = (userId: string) => `${this.state.mapKey}:${userId}`;
+  /** A saved spot is only usable if a player can stand there on today's map. */
+  private isStandable({ x, y }: { x: number; y: number }): boolean {
+    return (
+      Number.isFinite(x) &&
+      Number.isFinite(y) &&
+      !boxHitsSolid(this.grid, x, y + PLAYER_FEET_OFFSET, PLAYER_HALF_W, PLAYER_HALF_H)
+    );
+  }
 
-  private takeLastSpot(userId: string): { x: number; y: number } | null {
-    const key = this.spotKey(userId);
-    const spot = lastSpots.get(key);
-    lastSpots.delete(key);
-    return spot && Date.now() - spot.at < LAST_SPOT_MS ? spot : null;
+  /** Saves the spots of everyone who moved since their last save, in one batch. */
+  private saveMovedSpots(): void {
+    const moved: SpotRecord[] = [];
+    this.state.players.forEach((p) => {
+      const saved = this.savedSpots.get(p.userId);
+      if (saved && saved.x === p.x && saved.y === p.y) return;
+      moved.push({ userId: p.userId, x: p.x, y: p.y });
+      this.savedSpots.set(p.userId, { x: p.x, y: p.y });
+    });
+    saveSpots(this.state.mapKey, moved);
   }
 
   private removePlayer(sessionId: string): void {
     const player = this.state.players.get(sessionId);
     if (player) {
-      const now = Date.now();
-      lastSpots.set(this.spotKey(player.userId), { x: player.x, y: player.y, at: now });
-      // Forget anyone who's been gone long enough not to matter.
-      for (const [key, spot] of lastSpots) if (now - spot.at >= LAST_SPOT_MS) lastSpots.delete(key);
+      saveSpots(this.state.mapKey, [{ userId: player.userId, x: player.x, y: player.y }]);
+      this.savedSpots.delete(player.userId);
     }
     this.state.players.delete(sessionId);
     this.budgets.delete(sessionId);

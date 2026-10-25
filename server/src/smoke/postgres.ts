@@ -38,7 +38,7 @@ const q = async <T extends pg.QueryResultRow = pg.QueryResultRow>(sql: string, p
 
 async function wipe(): Promise<void> {
   await admin.query(`
-    DROP TABLE IF EXISTS users, spaces, schema_migrations CASCADE;
+    DROP TABLE IF EXISTS user_positions, users, spaces, schema_migrations CASCADE;
     DROP EXTENSION IF EXISTS pgcrypto;`);
 }
 const versions = async () => (await q<{ version: number }>("SELECT version FROM schema_migrations ORDER BY version")).map((r) => r.version);
@@ -60,6 +60,14 @@ check("upsert + get round-trip", (await repo.getUser(user.id))?.email === "ada@e
 check("a new user has no avatar yet", (await repo.getUser(user.id))?.avatar === "");
 await repo.setAvatar(user.id, "1.2.3.4.1.0");
 check("setAvatar round-trips (migration 2)", (await repo.getUser(user.id))?.avatar === "1.2.3.4.1.0");
+check("no saved spot yet", (await repo.getSpot(user.id, "office")) === null);
+const other = await repo.upsertUser({ email: "grace@example.com", name: "Grace" });
+await repo.saveSpots("office", [{ userId: user.id, x: 464.5, y: 688.25 }, { userId: other.id, x: 100, y: 200 }]);
+const spot = await repo.getSpot(user.id, "office");
+check("spots save in a batch and read back exactly (migration 3)", spot?.x === 464.5 && spot?.y === 688.25, JSON.stringify(spot));
+await repo.saveSpots("office", [{ userId: user.id, x: 10, y: 20 }]);
+check("saving again overwrites: one row per person, no history", (await q(`SELECT 1 FROM user_positions WHERE user_id = '${user.id}'`)).length === 1 && (await repo.getSpot(user.id, "office"))?.x === 10);
+check("spots are per space", (await repo.getSpot(user.id, "elsewhere")) === null);
 check("default space is seeded", (await repo.listSpaces()).some((s) => s.slug === "office"));
 await repo.ping();
 check("ping() answers", true);

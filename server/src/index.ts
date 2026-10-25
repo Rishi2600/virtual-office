@@ -10,6 +10,7 @@ import { log } from "./log.js";
 import { createRepository } from "./db/index.js";
 import { createAuthRouter } from "./auth/routes.js";
 import { OfficeRoom } from "./rooms/OfficeRoom.js";
+import { drainSpotSaves, setSpotStore } from "./rooms/spots.js";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
@@ -22,6 +23,7 @@ export async function startServer(): Promise<RunningServer> {
 
   const repo = createRepository();
   await repo.init();
+  setSpotStore(repo);
 
   const app = express();
   app.use(express.json({ limit: "64kb" }));
@@ -103,6 +105,10 @@ export async function startServer(): Promise<RunningServer> {
       // Disconnects every client (consented, so no 30s reconnect hold) and
       // disposes the rooms, then stops the HTTP/WS listener.
       await gameServer.gracefullyShutdown(false);
+      // Everyone's spot was queued for saving as they left; finish before the
+      // database closes, so a restart puts them back where they were.
+      await drainSpotSaves();
+      setSpotStore(null);
       await repo.close();
     })());
 

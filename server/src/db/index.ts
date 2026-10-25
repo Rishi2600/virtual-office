@@ -20,7 +20,7 @@ export function createRepository(): Repository {
     log.info({ backend: "postgres" }, "persistence backend selected");
     return new PgRepository(env.databaseUrl);
   }
-  const file = path.join(repoRoot, ".data", "dev.json");
+  const file = env.dataFile || path.join(repoRoot, ".data", "dev.json");
   log.warn({ backend: "file", file }, "no DATABASE_URL set - using local JSON store (dev only)");
   return new FileRepository(file);
 }

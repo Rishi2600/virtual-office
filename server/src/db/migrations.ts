@@ -53,4 +53,22 @@ export const MIGRATIONS: Migration[] = [
     // "" means "not built yet": the app then derives a default from the id.
     sql: `ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar TEXT NOT NULL DEFAULT '';`,
   },
+  {
+    version: 3,
+    name: "user_positions",
+    // Each person's latest spot per space, so a server restart puts everyone
+    // back where they were. One row per person and space, overwritten: no
+    // history (owner decision, docs/persistent-spot-plan.md). A table of its
+    // own so the frequent saves don't rewrite users rows.
+    sql: `
+      CREATE TABLE IF NOT EXISTS user_positions (
+        user_id    UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        space      TEXT NOT NULL,
+        x          DOUBLE PRECISION NOT NULL,
+        y          DOUBLE PRECISION NOT NULL,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        PRIMARY KEY (user_id, space)
+      );
+    `,
+  },
 ];
