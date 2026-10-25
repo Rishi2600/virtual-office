@@ -156,14 +156,16 @@ async function walkTo(peer: Peer, tx: number, ty: number, timeoutMs = 12000): Pr
   await sleep(150);
 }
 
-// Map landmarks. Row 19 is clear wall-to-wall and columns 5 and 22 have no desk
-// pods, so these routes never walk into furniture.
+// Map landmarks (scripts/gen-map.mjs guarantees them): row 19 is a clear
+// corridor wall to wall, row 28 is clear along the bottom wall, and the lobby
+// (columns 12-27 below row 19) is open floor, so these routes never walk into
+// furniture.
 const LANE_Y = 19 * TILE_SIZE + TILE_SIZE / 2; // 624
 const COL = (tile: number) => tile * TILE_SIZE + TILE_SIZE / 2;
 
 // ------------------------------------------------------------------- the test
 const server = await startServer();
-console.log(`\nvirtual-office integration test (port ${PORT})\n`);
+console.log(`\nLamports integration test (port ${PORT})\n`);
 
 const alice = await joinAs("Alice");
 const bob = await joinAs("Bob");
@@ -223,7 +225,8 @@ check(
 // -- 4. proximity -----------------------------------------------------------
 console.log("\nproximity");
 // Stage both peers in the clear corridor, routing via desk-free columns.
-await walkTo(alice, COL(5), self(alice).y);
+await walkTo(alice, COL(13), self(alice).y);
+await walkTo(alice, COL(13), LANE_Y);
 await walkTo(alice, COL(5), LANE_Y);
 await walkTo(bob, COL(22), self(bob).y);
 await walkTo(bob, COL(22), LANE_Y);
@@ -327,8 +330,8 @@ check("leaving focus mode opens the call", reopened);
 // Alice and Bob are adjacent here; Carol joins and stays across the room.
 console.log("\nchat");
 const carol = await joinAs("Carol");
-await walkTo(carol, COL(30), self(carol).y);
-await walkTo(carol, COL(30), LANE_Y);
+await walkTo(carol, COL(26), self(carol).y);
+await walkTo(carol, COL(26), LANE_Y);
 clearEvents(alice, bob, carol);
 
 const farGap = Math.hypot(self(carol).x - self(bob).x, self(carol).y - self(bob).y);

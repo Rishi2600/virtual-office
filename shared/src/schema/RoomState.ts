@@ -4,8 +4,9 @@ export class Player extends Schema {
   @type("string") userId = "";
   @type("string") name = "";
   @type("string") picture = "";
-  /** Frame index into avatars.png — derived from userId, stable per user. */
-  @type("number") avatar = 0;
+  /** Avatar look ("skin.hairStyle.hairColor.top.bottom.extra"), validated by
+   *  the server; drawn by the client from code. See shared/src/avatar.ts. */
+  @type("string") avatar = "";
 
   @type("number") x = 0;
   @type("number") y = 0;

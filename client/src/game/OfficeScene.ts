@@ -15,6 +15,7 @@ import {
   type OfficeState,
 } from "@vo/shared";
 import { positionBus, type ScreenPos } from "./bus.js";
+import { avatarSheet, DIRS, FRAME_H, FRAME_W, WALK_FRAMES, type Dir } from "./avatarArt.js";
 
 interface Snapshot {
   t: number;
@@ -27,7 +28,23 @@ interface AvatarView {
   sprite: Phaser.GameObjects.Sprite;
   label: Phaser.GameObjects.Text;
   badge: Phaser.GameObjects.Text;
+  /** The look its texture was built from (people can change it live). */
+  look: string;
+  /** Last drawn position, to tell walking from standing and pick a facing. */
+  lastX: number;
+  lastY: number;
+  dir: Dir;
+  /** Time spent walking, which drives the step frames. */
+  walkMs: number;
 }
+
+/** Avatars are drawn at 2x their 18x26 art, so 36x52 world px. */
+const AVATAR_SCALE = 2;
+/** Feet sit where the collision box is (PLAYER_FEET_OFFSET + PLAYER_HALF_H = 16
+ *  below the position); the art's feet are 22 art px from the top of a frame. */
+const AVATAR_ORIGIN_Y = (22 * AVATAR_SCALE - 16) / (FRAME_H * AVATAR_SCALE);
+/** One step frame every this many ms while walking. */
+const STEP_MS = 140;
 
 /** Send inputs at ~30Hz rather than every rendered frame. */
 const INPUT_SEND_MS = 33;
@@ -68,7 +85,6 @@ export class OfficeScene extends Phaser.Scene {
 
   preload(): void {
     this.load.image("tiles", "/assets/tiles.png");
-    this.load.spritesheet("avatars", "/assets/avatars.png", { frameWidth: 32, frameHeight: 32 });
     // The map object is imported from @vo/shared, the exact same file the server
     // builds its collision grid from.
     this.cache.tilemap.add("office", {
@@ -82,15 +98,18 @@ export class OfficeScene extends Phaser.Scene {
     const tileset = map.addTilesetImage("office", "tiles");
     if (!tileset) throw new Error("failed to bind tileset image");
 
+    // Floor, then walkable decor (chairs), then walls and furniture. Avatars
+    // are drawn above all three (depth 10+).
     map.createLayer("floor", tileset, 0, 0)?.setDepth(0);
-    map.createLayer("solid", tileset, 0, 0)?.setDepth(1);
+    map.createLayer("decor", tileset, 0, 0)?.setDepth(1);
+    map.createLayer("solid", tileset, 0, 0)?.setDepth(2);
 
     this.grid = buildCollisionGrid(officeMap);
 
     this.cameras.main.setBounds(0, 0, map.widthInPixels, map.heightInPixels);
     this.cameras.main.setZoom(1.75);
     this.cameras.main.setRoundPixels(true);
-    this.cameras.main.setBackgroundColor("#1c1f26");
+    this.cameras.main.setBackgroundColor("#0b0d12");
 
     const kb = this.input.keyboard!;
     const key = (code: number) => kb.addKey(code);
@@ -106,7 +125,7 @@ export class OfficeScene extends Phaser.Scene {
 
     // A faint ring showing how close you have to be before a call starts. Makes
     // proximity legible instead of something that just happens to you.
-    this.proximityRing = this.add.graphics().setDepth(2);
+    this.proximityRing = this.add.graphics().setDepth(3);
     this.proximityRing.lineStyle(2, 0x6fc3df, 0.35);
     this.proximityRing.strokeCircle(0, 0, PROXIMITY_ENTER);
 
@@ -213,6 +232,7 @@ export class OfficeScene extends Phaser.Scene {
       const isSelf = sessionId === room.sessionId;
 
       let view = this.avatars.get(sessionId);
+      if (view && view.look !== player.avatar) this.applyLook(view, player.avatar);
       if (!view) {
         view = this.createAvatar(player.name, player.avatar);
         this.avatars.set(sessionId, view);
@@ -231,13 +251,14 @@ export class OfficeScene extends Phaser.Scene {
         y = at.y;
       }
 
+      this.animate(view, x, y);
       view.container.setPosition(Math.round(x), Math.round(y));
       view.container.setDepth(10 + y / 1000);
       view.container.setAlpha(player.connected ? 1 : 0.35);
 
       const focus = player.status === "focus";
       const locked = player.lockGroup !== "";
-      view.sprite.setTint(focus ? 0x9aa4b2 : locked ? 0xffd479 : 0xffffff);
+      view.sprite.setTint(focus ? 0x9aa4b2 : 0xffffff);
 
       const badge = !player.connected
         ? "reconnecting"
@@ -271,19 +292,54 @@ export class OfficeScene extends Phaser.Scene {
     }
   }
 
-  private createAvatar(name: string, frame: number): AvatarView {
-    const sprite = this.add.sprite(0, 0, "avatars", frame);
+  private createAvatar(name: string, look: string): AvatarView {
+    const sprite = this.add.sprite(0, 0, this.lookTexture(look), "down:0");
+    sprite.setScale(AVATAR_SCALE).setOrigin(0.5, AVATAR_ORIGIN_Y);
     const label = this.add
-      .text(0, 18, name, { fontFamily: "monospace", fontSize: "10px", color: "#f2f4f8" })
+      .text(0, 20, name, { fontFamily: "monospace", fontSize: "10px", color: "#f2f4f8" })
       .setOrigin(0.5, 0);
     label.setShadow(0, 1, "#11141a", 2);
     const badge = this.add
-      .text(0, -22, "", { fontFamily: "monospace", fontSize: "9px", color: "#ffd479" })
+      .text(0, -40, "", { fontFamily: "monospace", fontSize: "9px", color: "#ffd479" })
       .setOrigin(0.5, 0)
       .setVisible(false);
 
     const container = this.add.container(0, 0, [sprite, label, badge]);
-    return { container, sprite, label, badge };
+    return { container, sprite, label, badge, look, lastX: NaN, lastY: NaN, dir: "down", walkMs: 0 };
+  }
+
+  /** A texture per look, built once from the code-drawn sprite sheet, with a
+   *  named frame per direction and step ("left:2"). */
+  private lookTexture(look: string): string {
+    const key = `look:${look}`;
+    if (this.textures.exists(key)) return key;
+    const texture = this.textures.addCanvas(key, avatarSheet(look))!;
+    DIRS.forEach((dir, row) => {
+      for (let f = 0; f < WALK_FRAMES; f++) texture.add(`${dir}:${f}`, 0, f * FRAME_W, row * FRAME_H, FRAME_W, FRAME_H);
+    });
+    return key;
+  }
+
+  private applyLook(view: AvatarView, look: string): void {
+    view.look = look;
+    view.sprite.setTexture(this.lookTexture(look), `${view.dir}:0`);
+  }
+
+  /** Faces the way the avatar is moving and steps while it moves. */
+  private animate(view: AvatarView, x: number, y: number): void {
+    const dx = x - view.lastX;
+    const dy = y - view.lastY;
+    view.lastX = x;
+    view.lastY = y;
+    const moving = Number.isFinite(dx) && Math.hypot(dx, dy) > 0.15;
+    if (moving) {
+      view.dir = Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? "right" : "left") : dy > 0 ? "down" : "up";
+      view.walkMs += this.game.loop.delta;
+    } else {
+      view.walkMs = 0;
+    }
+    const frame = moving ? Math.floor(view.walkMs / STEP_MS) % WALK_FRAMES : 0;
+    view.sprite.setFrame(`${view.dir}:${frame}`);
   }
 
   // --------------------------------------------------- snapshot interpolation

@@ -14,6 +14,7 @@ import {
   TICK_MS,
   applyInput,
   isPolite,
+  resolveLook,
   type CollisionGrid,
   type InputMessage,
   type ProximityEnterMessage,
@@ -107,7 +108,7 @@ export class OfficeRoom extends Room<OfficeState> {
     player.userId = auth.sub;
     player.name = auth.name || auth.email;
     player.picture = auth.picture ?? "";
-    player.avatar = avatarFor(auth.sub);
+    player.avatar = resolveLook(undefined, auth.sub);
 
     const spawn = this.spawns[this.spawnCursor++ % this.spawns.length]!;
     player.x = spawn.x;
@@ -348,11 +349,4 @@ export class OfficeRoom extends Room<OfficeState> {
   private sendTo(sessionId: string, type: string, payload: unknown): void {
     this.clients.getById(sessionId)?.send(type, payload);
   }
-}
-
-/** Stable per-user avatar frame (avatars.png has 8 variants). */
-function avatarFor(userId: string): number {
-  let h = 0;
-  for (let i = 0; i < userId.length; i++) h = (h * 31 + userId.charCodeAt(i)) >>> 0;
-  return h % 8;
 }

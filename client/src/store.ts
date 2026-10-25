@@ -28,7 +28,8 @@ export interface PlayerView {
   userId: string;
   name: string;
   picture: string;
-  avatar: number;
+  /** Avatar look string (shared/src/avatar.ts). */
+  avatar: string;
   status: PlayerStatus;
   micOn: boolean;
   camOn: boolean;
