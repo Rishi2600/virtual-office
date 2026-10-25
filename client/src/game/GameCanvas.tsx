@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import Phaser from "phaser";
 import { OfficeScene } from "./OfficeScene.js";
 import { roomRef } from "../net/session.js";
+import { sceneBus } from "./sceneBus.js";
 
 /**
  * The Phaser game is created ONCE for the page, and only once its host element
@@ -76,7 +77,23 @@ export function GameCanvas() {
     sync();
     const observer = new ResizeObserver(sync);
     observer.observe(el);
-    return () => observer.disconnect();
+
+    // Scrolling over the map zooms it (one step per notch; trackpads send
+    // many small deltas, so they're added up). Not passive, so the page itself
+    // doesn't scroll or pinch-zoom instead.
+    let wheel = 0;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      wheel += e.deltaY;
+      if (Math.abs(wheel) < 60) return;
+      sceneBus.send({ type: "zoom", step: wheel < 0 ? 1 : -1 });
+      wheel = 0;
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => {
+      observer.disconnect();
+      el.removeEventListener("wheel", onWheel);
+    };
   }, []);
 
   return (

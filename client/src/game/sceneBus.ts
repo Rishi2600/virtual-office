@@ -5,6 +5,7 @@
  */
 export type SceneCommand =
   | { type: "panTo"; sessionId: string }
+  | { type: "panToPoint"; x: number; y: number }
   | { type: "walkTo"; sessionId: string }
   | { type: "zoom"; step: 1 | -1 }
   | { type: "recenter" };

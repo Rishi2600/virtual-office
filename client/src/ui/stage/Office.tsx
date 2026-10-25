@@ -9,6 +9,8 @@ import { PeoplePanel } from "../people/PeoplePanel.js";
 import { RemoteAudio } from "../RemoteAudio.js";
 import { Dock } from "./Dock.js";
 import { HuddleBar } from "./HuddleBar.js";
+import { MapOverlay } from "./MapOverlay.js";
+import { MapTools } from "./MapTools.js";
 import { StageBanners } from "./StageBanners.js";
 import { TopBar } from "./TopBar.js";
 import "./stage.css";
@@ -59,7 +61,13 @@ export function Office({ session, onLeave }: { session: Session | null; onLeave:
       <div className={`office-body ${docked ? "with-chat" : ""} ${layout === "tablet" ? "tablet" : ""}`}>
         <PeoplePanel collapsed={layout === "tablet"} />
         <main className="stage" aria-label="Office map">
-          {session && <GameCanvas />}
+          {session && (
+            <>
+              <GameCanvas />
+              <MapOverlay />
+              <MapTools />
+            </>
+          )}
           <RemoteAudio />
           <StageBanners session={session} />
           <HuddleBar session={session} />

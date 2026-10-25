@@ -1,0 +1,47 @@
+/* HTML drawn over the Phaser map: room names, name pills, speaking rings, map tools. */
+.map-overlay { position: absolute; inset: 0; z-index: 2; overflow: hidden; pointer-events: none; --z: 1.75; }
+
+.room-label {
+  position: absolute; left: 0; top: 0; translate: -50% -50%; white-space: nowrap;
+  font-size: var(--fs-xs); font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;
+  color: rgba(233, 237, 243, 0.55); text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+}
+
+.person-mark { position: absolute; left: 0; top: 0; width: 0; height: 0; }
+.person-mark.away { opacity: 0.5; }
+.name-pill {
+  position: absolute; left: 0; top: 6px; translate: -50% 0; white-space: nowrap;
+  display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px; border-radius: var(--r-full);
+  background: var(--glass); border: 1px solid rgba(255, 255, 255, 0.08); box-shadow: var(--shadow-1);
+  font-size: var(--fs-xs); font-weight: 500; color: var(--text);
+}
+.name-pill.me { border-color: rgba(177, 140, 255, 0.6); }
+.name-pill-text { max-width: 140px; overflow: hidden; text-overflow: ellipsis; }
+.name-pill .ic-warn { color: var(--warning); }
+
+/* An ellipse on the floor around the feet; scales with the map zoom. */
+.speak-ring {
+  position: absolute; left: 0; top: 0; translate: -50% -60%;
+  width: calc(var(--z) * 26px); height: calc(var(--z) * 9px); border-radius: 50%;
+  border: 2px solid var(--success); box-shadow: 0 0 10px rgba(20, 241, 149, 0.6);
+  animation: speak-pulse 1.2s ease-in-out infinite;
+}
+@keyframes speak-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
+
+.private-hint {
+  position: absolute; left: 0; top: 0; white-space: nowrap;
+  display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: var(--r-md);
+  background: var(--surface-2); border: 1px solid var(--border-strong); box-shadow: var(--shadow-2); font-size: var(--fs-sm);
+}
+.private-hint svg { color: var(--warning); }
+.private-hint[hidden] { display: none; }
+
+.map-tools { position: absolute; right: 14px; top: 14px; z-index: 7; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
+.minimap { padding: 5px; border-radius: var(--r-md); background: var(--glass); border: 1px solid var(--border); }
+.minimap canvas { display: block; width: 160px; height: 120px; border-radius: 6px; cursor: pointer; }
+.zoom { display: flex; flex-direction: column; overflow: hidden; border-radius: var(--r-md); background: var(--glass); border: 1px solid var(--border); }
+.zoom button { width: 34px; height: 32px; display: grid; place-items: center; border: 0; background: transparent; color: var(--text); }
+.zoom button:hover { background: var(--surface-hover); }
+.zoom button + button { border-top: 1px solid var(--border); }
+.office-body.tablet .minimap { display: none; }
+.office-body.tablet .zoom button { width: 44px; height: 44px; }
