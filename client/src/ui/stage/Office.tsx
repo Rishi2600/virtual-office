@@ -5,6 +5,7 @@ import { GameCanvas } from "../../game/GameCanvas.js";
 import { meter, prune } from "../../webrtc/speaking.js";
 import { useLayout } from "../layout.js";
 import { ChatPanel } from "../chat/ChatPanel.js";
+import { useChatAlerts } from "../chat/useChatAlerts.js";
 import { PeoplePanel } from "../people/PeoplePanel.js";
 import { RemoteAudio } from "../RemoteAudio.js";
 import { SettingsDialog } from "../settings/SettingsDialog.js";
@@ -47,6 +48,7 @@ export function Office({ session, onLeave }: { session: Session | null; onLeave:
   const layout = useLayout();
   const chatVisible = useStore((s) => s.chatVisible);
   useSpeakingMeters();
+  useChatAlerts();
 
   // Narrow screens start with the chat drawer closed so the map is usable.
   useEffect(() => {

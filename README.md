@@ -1,8 +1,8 @@
-# Virtual Office
+# Lamports
 
 A lightweight, self-hosted Gather.town-style virtual office for a small team (~20 people).
 
-Walk your avatar around a 2D pixel-art office. When you get close to someone, **text chat and voice
+Walk your avatar around a 2D pixel-art office (click the floor or use the keyboard). When you get close to someone, **text chat and voice
 open automatically** — walk away and they close. **Video is opt-in**: nobody's camera turns on just
 because someone walked past. Share your screen while you're talking, and lock a conversation when
 you don't want to be interrupted.
@@ -51,19 +51,21 @@ Real sign-in needs OAuth credentials (see [below](#sign-in-providers)), so local
 
 1. Open <http://localhost:5173/?dev=Alice> in one tab.
 2. Open <http://localhost:5173/?dev=Bob> in a second tab.
-3. Click the Alice tab (it needs keyboard focus) and walk into Bob with the arrow keys or WASD.
+3. In the Alice tab, walk into Bob: arrow keys / WASD, click the floor next to him, or use the
+   **walk** button next to his name in the people list.
 
 `?dev=<name>` signs that tab in and keeps its identity in `sessionStorage`, which is per-tab — so
 the two tabs stay two different people instead of sharing one cookie. The parameter is stripped
 from the URL immediately. Plain tabs without the parameter share a session, as you'd expect.
 
-When they get within ~120px, the **Nearby** chat tab becomes live and voice connects. Walk apart and
-it tears down. The faint ring around your avatar shows how close you need to be.
+When they get within ~120px, the **Nearby** chat tab becomes live, voice connects, and a huddle bar
+with a tile per person appears. Walk apart and it tears down. The soft glow on the floor around you
+shows how close you need to be.
 
-> The browser asks for your **microphone** on load — that's the only device requested up front, and
-> the "mic live" pill in the corner shows whenever it's actually in use. The **camera is never
-> touched** until you click *Turn on video*. If you deny either, the app says so explicitly and
-> still connects you receive-only, so you can hear the other person and use chat.
+> The browser asks for your **microphone** on load — that's the only device requested up front. The
+> **camera is never touched** until you turn it on (the camera button, or `V`). If you deny either,
+> the app says so explicitly and still connects you receive-only, so you can hear the other person
+> and use chat.
 
 If your browser blocks sound until you've clicked on the page (common right after signing in), a
 banner offers **Enable audio**; one click and you'll hear the people near you.
@@ -75,39 +77,56 @@ Dev sign-in only exists in development (`npm run dev`). Anywhere else it's off, 
 
 ## Controls
 
+Lamports works on laptops, desktops and tablets (768px and wider); phones get a friendly
+"needs a bigger screen" page. Below 1280px the chat becomes a drawer (the chat button in the top
+bar shows unread messages); on tablets the people list shrinks to faces.
+
 | Action | Key / control |
 | --- | --- |
-| Move | Arrow keys or WASD |
-| Chat with people near you | **Nearby** tab in the sidebar |
-| Chat with the whole office | **Everyone** tab |
-| Mute / unmute | **Mic** button |
-| Start / stop your camera | **Turn on video** button |
-| Share screen | **Share screen** button |
-| Keep others out of your conversation | **Lock conversation** button |
-| Do not disturb entirely | **Available / Focus mode** toggle |
+| Move | Arrow keys or WASD, or **click / tap the floor** to walk there |
+| Find someone | **Ctrl K** (⌘ K on a Mac): Enter walks there, Shift+Enter just looks |
+| Look at / walk to someone | Click them in the people list / their **walk** button |
+| Zoom · back to me | Mouse wheel, **+** / **−**, **0** (also the buttons and minimap, top right) |
+| Chat | **Enter** to type, **Esc** back to the map; **Nearby** (your huddle) or **Everyone** |
+| Mute / unmute | **M** or the mic button |
+| Camera on / off | **V** or the camera button |
+| Share screen | **P** or the screen button |
+| Lock your huddle (keep others out) | **L** or the lock button |
+| Focus mode (nobody can call you) | **F** or the moon button |
+| Settings (devices, sounds, notifications) · avatar · leave | **More** (⋯) in the dock, or your avatar, top right |
+
+Shortcuts work anywhere except while you're typing. **Leave office** takes you out of the space
+without signing you out; **Rejoin** brings you back.
+
+Settings lets you pick your microphone, camera and speakers (remembered per browser), shows a mic
+level meter and plays a test sound. **Sounds** (a soft chime when someone joins you or messages you)
+are **off by default**, and **desktop notifications** are opt-in; a notification says who wrote,
+never what (so the message doesn't end up in your system's notification history).
 
 Muting flips the track's `enabled` flag — it never tears down the call.
 
-Each call tile shows how the call is doing: a small **green / amber / red dot** for connection
+Each tile in the huddle bar shows how the call is doing: a small **green / amber / red dot** for connection
 quality (round-trip time and packet loss), **reconnecting…** while it recovers from a network
 hiccup, and **can't connect** if it still hasn't after several tries. It keeps retrying in the
 background for as long as you stay near the person.
 
-**Video is opt-in.** Proximity connects audio only; the camera is acquired the first time you click
-*Turn on video*, and turning it off releases the device. Peers see an initial instead of a video
-tile whenever your camera is off. If you deny the camera, clicking *Turn on video* again asks again.
+**Video is opt-in.** Proximity connects audio only; the camera is acquired the first time you turn
+it on, and turning it off releases the device. Peers see your avatar instead of video whenever your
+camera is off. If you deny the camera, the button says so and clicking it again asks again. A
+shared screen opens big above the huddle bar for everyone in the huddle, with a full-screen button.
 
 While you share your screen, peers see the screen; your camera can be turned on or off meanwhile
 without interrupting the share, and they see the camera again once you stop sharing.
 
 **Two different ways to not be disturbed**, because they solve different problems:
 
-- **Lock conversation** — for "we two are busy". Anyone already in the huddle can lock it. People
-  walking past are not connected and see a *private* badge on the avatars; the people already
+- **Lock your huddle** — for "we two are busy". Anyone already in the huddle can lock it. People
+  walking past are not connected and see a lock on the name pills (and a "private conversation"
+  note when they walk up); the people already
   talking are unaffected. It releases automatically once the participants separate, so you can't
   strand yourself in a lock nobody else holds.
 - **Focus mode** — for "leave me alone entirely". The server refuses to pair you with anyone at
-  all, so no offer is ever made. The greyed-out avatar and sidebar badge are additional signal, not
+  all, so no offer is ever made. The greyed-out avatar and moon on your name are additional signal, not
   the mechanism.
 
 Both are enforced server-side, so a patched client can't force its way into either.
@@ -384,6 +403,8 @@ Peers see you greyed out and your calls tear down immediately rather than freezi
   synchronised room state — the server forwards them and forgets them, and they live in browser
   memory until you reload.
 - **The camera is only ever opened by an explicit click**, never by proximity.
+- **"Who's speaking"** (the green rings and bars) is worked out in your browser from the live volume
+  level only; no audio is kept or sent anywhere for it.
 - **Stored data** is limited to user profile (name, email, avatar URL, timestamps) and space
   metadata.
 
