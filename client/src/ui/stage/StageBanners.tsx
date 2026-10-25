@@ -4,6 +4,7 @@ import type { Session } from "../../net/session.js";
 import { retryMicrophone } from "../../webrtc/media.js";
 import { resumeRemoteAudio } from "../RemoteAudio.js";
 import { Button } from "../primitives/primitives.js";
+import { IntroCard } from "./IntroCard.js";
 import "./stage.css";
 
 /**
@@ -66,6 +67,11 @@ export function StageBanners({ session }: { session: Session | null }) {
       </div>,
     );
   }
-  if (banners.length === 0) return null;
-  return <div className="banners">{banners}</div>;
+  // The first-run intro sits in the same stack, under any problems.
+  return (
+    <div className="banners">
+      {banners}
+      <IntroCard />
+    </div>
+  );
 }

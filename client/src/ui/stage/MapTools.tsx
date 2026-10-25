@@ -1,40 +1,19 @@
 import { useEffect, useRef } from "react";
 import { LocateFixed, Minus, Plus } from "lucide-react";
-import officeMap from "@vo/shared/maps/office.json";
-import type { TiledMap } from "@vo/shared";
 import { useStore } from "../../store.js";
 import { positionBus, type MapFrame } from "../../game/bus.js";
 import { sceneBus } from "../../game/sceneBus.js";
+import { MAP, drawMapPicture } from "../../game/mapPicture.js";
 import { isTyping } from "./Dock.js";
 import "./map.css";
 
-const MAP = officeMap as TiledMap;
 const TILE = MAP.tilewidth;
 /** Minimap px per tile. */
 const MINI = 4;
-const COLUMNS = 8; // tiles per row in tiles.png
 const W = MAP.width * MINI;
 const H = MAP.height * MINI;
 /** The minimap redraws at most this often; it doesn't need 60fps. */
 const MINI_FRAME_MS = 100;
-
-/** The map, drawn small, once. */
-function drawBase(tiles: HTMLImageElement): HTMLCanvasElement {
-  const c = document.createElement("canvas");
-  c.width = W;
-  c.height = H;
-  const ctx = c.getContext("2d")!;
-  ctx.imageSmoothingEnabled = true;
-  for (const layer of MAP.layers) {
-    if (layer.type !== "tilelayer" || !layer.data) continue;
-    layer.data.forEach((gid, i) => {
-      if (!gid) return;
-      const t = gid - 1;
-      ctx.drawImage(tiles, (t % COLUMNS) * TILE, Math.floor(t / COLUMNS) * TILE, TILE, TILE, (i % MAP.width) * MINI, Math.floor(i / MAP.width) * MINI, MINI, MINI);
-    });
-  }
-  return c;
-}
 
 /**
  * Zoom in/out, back to me, and a minimap (click it to look somewhere). The
@@ -45,9 +24,7 @@ export function MapTools() {
 
   useEffect(() => {
     let base: HTMLCanvasElement | null = null;
-    const img = new Image();
-    img.onload = () => (base = drawBase(img));
-    img.src = "/assets/tiles.png";
+    void drawMapPicture(MINI).then((c) => (base = c));
 
     let last = 0;
     let latest: MapFrame | null = null;

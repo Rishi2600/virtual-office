@@ -43,6 +43,7 @@ export async function join(browser: Browser, label: string, init?: () => void): 
   // suggested look, as a first-time user who isn't fussed would.
   await page.getByRole("button", { name: "Keep this one" }).click();
   await page.getByTestId("avatar-builder").waitFor({ state: "hidden" });
+  await page.getByRole("button", { name: "Got it" }).click(); // the first-run intro
   return { name, context, page };
 }
 

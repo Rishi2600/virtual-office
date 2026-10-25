@@ -57,11 +57,12 @@ export class Session {
   async connect(): Promise<void> {
     useStore.getState().set({ connection: "connecting", connectionDetail: "" });
 
-    // Ask for the MICROPHONE only, and before joining, so the first proximity
-    // call already has audio and the permission prompt isn't tangled up with
-    // someone walking up to you. The camera is never requested here — video is
-    // opt-in and only acquired when the user clicks for it.
-    await ensureMicrophone();
+    // Ask for the MICROPHONE only (the camera is never requested here: video
+    // is opt-in), but don't wait for the answer: the browser's prompt can sit
+    // there as long as the user likes, and they should be in the office
+    // meanwhile. Once it's answered, the track joins any call already open,
+    // the same way the "Try again" banner does.
+    void ensureMicrophone().then(() => this.peers?.setLocalStream(useStore.getState().localStream));
 
     await this.refreshIceServers();
     const token = await fetchRealtimeToken();
