@@ -37,7 +37,8 @@ export function FinderDialog() {
 
   // The dialog stays mounted while closed, so focus the field each time it opens.
   useEffect(() => {
-    if (open) requestAnimationFrame(() => input.current?.focus());
+    // Synchronously, so letters typed straight after Ctrl K land in the field.
+    if (open) input.current?.focus();
   }, [open]);
 
   // Global shortcut, also from inside text fields (it has a modifier).

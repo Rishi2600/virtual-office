@@ -66,7 +66,7 @@ export function Office({ session, onLeave }: { session: Session | null; onLeave:
   return (
     <div className="app">
       <TopBar onLeave={onLeave} />
-      <div className={`office-body ${docked ? "with-chat" : ""} ${layout === "tablet" ? "tablet" : ""}`}>
+      <div className={`office-body ${docked ? "with-chat" : ""} ${drawer ? "drawer-open" : ""} ${layout === "tablet" ? "tablet" : ""}`}>
         <PeoplePanel collapsed={layout === "tablet"} />
         <main className="stage" aria-label="Office map">
           {session && (

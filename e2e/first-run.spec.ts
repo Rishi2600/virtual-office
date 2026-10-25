@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { join, leave } from "./helpers.js";
 
 test("a failed sign-in says so once, and the error leaves the address bar", async ({ page }) => {
   await page.goto("/?error=auth");
@@ -28,4 +29,25 @@ test("first visit: sign in, build an avatar, read the intro once", async ({ page
   await expect(page.getByTestId("avatar-builder")).toBeHidden();
   await expect(page.getByTestId("intro")).toHaveCount(0);
   await page.evaluate(() => window.__session?.disconnect());
+});
+
+test("Leave office, then Rejoin: back in, and the map still works", async ({ browser }) => {
+  const me = await join(browser, "Leaver");
+  const page = me.page;
+  const x = () =>
+    page.evaluate(() => (window as unknown as { __game: { scene: { keys: { office: { predicted: { x: number } } } } } }).__game.scene.keys.office.predicted.x);
+
+  await page.getByRole("button", { name: "More" }).click();
+  await page.getByRole("menuitem", { name: "Leave office" }).click();
+  await expect(page.getByTestId("left-screen")).toBeVisible();
+  await page.getByRole("button", { name: "Rejoin" }).click();
+  await page.waitForFunction(() => window.__store?.getState().connection === "connected");
+
+  const before = await x();
+  await page.locator("[data-map-focus]").focus();
+  await page.keyboard.down("ArrowRight");
+  await page.waitForTimeout(500);
+  await page.keyboard.up("ArrowRight");
+  await expect.poll(x).toBeGreaterThan(before + 20);
+  await leave(me);
 });

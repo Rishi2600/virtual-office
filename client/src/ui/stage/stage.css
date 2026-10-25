@@ -98,6 +98,16 @@
 .tile-overlay-hint { color: var(--text-muted); font-size: 11px; }
 .ic-danger { color: var(--danger); flex: none; }
 
+/* A screen share needs the whole width; the map tools come back when it ends. */
+.stage:has(.spotlight) .map-tools { display: none; }
+/* The chat drawer covers the right of the map: keep everything floating in
+   the part you can still see. */
+.office-body.drawer-open .dock,
+.office-body.drawer-open .huddle { left: calc((100% - min(var(--chat-w), 90vw)) / 2); }
+.office-body.drawer-open .map-tools { right: calc(min(var(--chat-w), 90vw) + 14px); }
+.office-body.drawer-open .banners { right: calc(min(var(--chat-w), 90vw) + 16px); }
+.office-body.drawer-open .spotlight { right: calc(min(var(--chat-w), 90vw) + 24px); }
+
 .spotlight {
   position: absolute; left: 24px; right: 24px; top: 18px; bottom: 200px; z-index: 4; overflow: hidden;
   display: flex; flex-direction: column; border-radius: var(--r-lg);

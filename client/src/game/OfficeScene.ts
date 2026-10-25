@@ -52,6 +52,9 @@ const INPUT_SEND_MS = 33;
 /** Above this error we stop easing and just snap — something went badly wrong. */
 const HARD_SNAP_PX = 48;
 
+/** World px the camera may scroll past the bottom of the map. */
+const BOTTOM_ROOM_PX = 160;
+
 /** Zoom steps for the buttons, wheel and +/- keys; starts at 1.75. */
 const ZOOMS = [1, 1.25, 1.5, 1.75, 2, 2.5];
 const DEFAULT_ZOOM = 3;
@@ -135,7 +138,9 @@ export class OfficeScene extends Phaser.Scene {
 
     this.grid = buildCollisionGrid(officeMap);
 
-    this.cameras.main.setBounds(0, 0, map.widthInPixels, map.heightInPixels);
+    // Extra room below the map, so someone standing at the bottom edge can
+    // still be centred above the dock and huddle bar instead of under them.
+    this.cameras.main.setBounds(0, 0, map.widthInPixels, map.heightInPixels + BOTTOM_ROOM_PX);
     this.cameras.main.setZoom(ZOOMS[DEFAULT_ZOOM]!);
     this.cameras.main.setRoundPixels(true);
     this.cameras.main.setBackgroundColor("#0b0d12");

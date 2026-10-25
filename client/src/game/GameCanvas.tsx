@@ -70,8 +70,16 @@ export function GameCanvas() {
       }
 
       // Remount: adopt the existing canvas rather than rebuilding the renderer.
-      if (existing.canvas && existing.canvas.parentElement !== el) el.appendChild(existing.canvas);
+      // The scale manager measures its parent every frame, so it must measure
+      // the new host: left on the old (removed) one it resizes the game to
+      // 0x0, and WebGL then throws and stops the game loop ("Leave office",
+      // then Rejoin, used to leave you unable to move).
+      if (existing.canvas && existing.canvas.parentElement !== el) {
+        el.appendChild(existing.canvas);
+        existing.scale.parent = el;
+      }
       existing.scale.resize(width, height);
+      if (!existing.loop.running) existing.loop.wake();
     };
 
     sync();
@@ -123,6 +131,10 @@ export function GameCanvas() {
     el.addEventListener("pointercancel", onUp);
     return () => {
       observer.disconnect();
+      // The map is gone (e.g. "Leave office"): pause the game rather than let
+      // it draw into a detached, zero-sized canvas (which WebGL reports as an
+      // incomplete framebuffer). It wakes when the map comes back.
+      getGame()?.loop.sleep();
       el.removeEventListener("wheel", onWheel);
       el.removeEventListener("pointerdown", onDown);
       el.removeEventListener("pointermove", onMove);
