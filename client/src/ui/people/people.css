@@ -49,3 +49,21 @@
 .people.collapsed { align-items: center; gap: 6px; padding: 10px 0; overflow-y: auto; }
 .people-face { position: relative; border: 0; background: transparent; padding: 4px; border-radius: 50%; }
 .people-face:hover { background: var(--surface-2); }
+
+/* ---------------------------------------------------------- finder (Ctrl K) */
+.finder-input {
+  display: flex; align-items: center; gap: 8px; padding: 0 12px; color: var(--text-muted);
+  background: var(--surface-2); border: 1px solid var(--border-strong); border-radius: var(--r-sm);
+}
+.finder-input:focus-within { border-color: var(--accent); }
+.finder-input input { flex: 1; min-width: 0; padding: 10px 0; border: 0; outline: none; background: transparent; color: var(--text); font-size: var(--fs-md); }
+.finder-list { list-style: none; margin: 0; padding: 0; max-height: 320px; overflow-y: auto; display: grid; gap: 2px; }
+.finder-row { display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: var(--r-sm); cursor: pointer; }
+.finder-row.on { background: var(--surface-3); }
+.finder-who { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.finder-who b { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.finder-who span { font-size: var(--fs-xs); color: var(--text-muted); }
+.finder-look { display: grid; place-items: center; width: 28px; height: 28px; border: 0; border-radius: var(--r-sm); background: transparent; color: var(--text-muted); }
+.finder-look:hover { background: var(--surface-hover); color: var(--text); }
+.finder-walk { color: var(--text-muted); visibility: hidden; }
+.finder-row.on .finder-walk { visibility: visible; color: var(--accent); }

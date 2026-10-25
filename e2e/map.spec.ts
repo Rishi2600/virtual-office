@@ -34,3 +34,19 @@ test("a phone-sized screen gets a friendly page, not the office", async ({ brows
   await expect(page.getByTestId("dock")).toHaveCount(0);
   await context.close();
 });
+
+test("Ctrl K finds a person and Enter walks you to them", async ({ browser }) => {
+  const alice = await join(browser, "Alice");
+  const bob = await join(browser, "Bob");
+  people = [alice, bob];
+
+  await alice.page.keyboard.press("Control+k");
+  const field = alice.page.getByRole("combobox", { name: "Name" });
+  await expect(field).toBeFocused();
+  await field.fill(bob.name.slice(0, 5));
+  await expect(alice.page.getByRole("option", { name: new RegExp(bob.name) })).toHaveAttribute("aria-selected", "true");
+  await field.press("Enter");
+
+  await expect(alice.page.getByTestId("finder")).not.toBeVisible();
+  await expect.poll(() => allPeersConnected(alice.page), { timeout: 30_000 }).toBe(true);
+});
