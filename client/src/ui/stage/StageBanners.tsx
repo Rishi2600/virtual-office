@@ -27,7 +27,13 @@ export function StageBanners({ session }: { session: Session | null }) {
         <div className="banner-text">
           <div className="banner-title">{failed ? "Couldn't reconnect" : connection === "connecting" ? "Joining the office…" : "Connection lost, reconnecting…"}</div>
           <div className="banner-detail">
-            {failed ? detail || "Check your network, then reload." : connection === "connecting" ? "One moment." : "You'll be back in your spot in a moment. Calls resume automatically."}
+            {failed
+              ? detail || "Check your network, then reload."
+              : connection === "connecting"
+                ? "One moment."
+                : detail.includes("offline")
+                  ? detail
+                  : "You'll be back in your spot in a moment. Calls resume automatically."}
           </div>
         </div>
         {failed && <Button onClick={() => location.reload()}>Reload</Button>}

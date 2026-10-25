@@ -3,6 +3,7 @@ import {
   C2S,
   CHAT_MAX_LENGTH,
   MAX_INPUT_DT,
+  PROXIMITY_EXIT,
   OfficeState,
   Player,
   type ChatInMessage,
@@ -41,6 +42,17 @@ interface InputBudget {
   remaining: number;
   last: number;
 }
+
+/** Coming back within this long puts you where you were (a reload, a laptop
+ *  lid, a crash), instead of at a spawn point. */
+const LAST_SPOT_MS = 10 * 60 * 1000;
+
+/**
+ * Where each person last stood, per map: in memory only (a server restart
+ * forgets it; positions are deliberately not stored in the database).
+ * Module-level so it outlives the room, which is disposed when it empties.
+ */
+const lastSpots = new Map<string, { x: number; y: number; at: number }>();
 
 /**
  * One Colyseus room == one virtual office space == one authoritative unit of
@@ -113,9 +125,9 @@ export class OfficeRoom extends Room<OfficeState> {
     player.picture = auth.picture ?? "";
     player.avatar = resolveLook(auth.avatar, auth.sub);
 
-    const spawn = this.spawns[this.spawnCursor++ % this.spawns.length]!;
-    player.x = spawn.x;
-    player.y = spawn.y;
+    const spot = this.takeLastSpot(auth.sub) ?? this.pickSpawn();
+    player.x = spot.x;
+    player.y = spot.y;
 
     this.state.players.set(client.sessionId, player);
     this.budgets.set(client.sessionId, { remaining: BUDGET_CAP_SEC, last: Date.now() });
@@ -161,7 +173,45 @@ export class OfficeRoom extends Room<OfficeState> {
     wsLog.info({ roomId: this.roomId }, "room disposed");
   }
 
+  /**
+   * The next spawn point, in rotation, that isn't within earshot of anyone,
+   * so nobody arrives inside someone else's conversation. If every spawn is
+   * taken, the one furthest from everybody.
+   */
+  private pickSpawn(): { x: number; y: number } {
+    const n = this.spawns.length;
+    let best = this.spawns[this.spawnCursor % n]!;
+    let bestGap = -1;
+    for (let i = 0; i < n; i++) {
+      const s = this.spawns[(this.spawnCursor + i) % n]!;
+      let gap = Infinity;
+      this.state.players.forEach((p) => {
+        gap = Math.min(gap, Math.hypot(p.x - s.x, p.y - s.y));
+      });
+      if (gap > bestGap) [best, bestGap] = [s, gap];
+      if (gap > PROXIMITY_EXIT) break;
+    }
+    this.spawnCursor++;
+    return best;
+  }
+
+  private spotKey = (userId: string) => `${this.state.mapKey}:${userId}`;
+
+  private takeLastSpot(userId: string): { x: number; y: number } | null {
+    const key = this.spotKey(userId);
+    const spot = lastSpots.get(key);
+    lastSpots.delete(key);
+    return spot && Date.now() - spot.at < LAST_SPOT_MS ? spot : null;
+  }
+
   private removePlayer(sessionId: string): void {
+    const player = this.state.players.get(sessionId);
+    if (player) {
+      const now = Date.now();
+      lastSpots.set(this.spotKey(player.userId), { x: player.x, y: player.y, at: now });
+      // Forget anyone who's been gone long enough not to matter.
+      for (const [key, spot] of lastSpots) if (now - spot.at >= LAST_SPOT_MS) lastSpots.delete(key);
+    }
     this.state.players.delete(sessionId);
     this.budgets.delete(sessionId);
   }

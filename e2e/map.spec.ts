@@ -50,3 +50,15 @@ test("Ctrl K finds a person and Enter walks you to them", async ({ browser }) =>
   await expect(alice.page.getByTestId("finder")).not.toBeVisible();
   await expect.poll(() => allPeersConnected(alice.page), { timeout: 30_000 }).toBe(true);
 });
+
+test("closing the tab removes you for everyone at once, not after the reconnect window", async ({ browser }) => {
+  const alice = await join(browser, "Alice");
+  const bob = await join(browser, "Bob");
+  people = [bob];
+  const pill = bob.page.getByTestId("name-pill").filter({ hasText: alice.name });
+  await expect(pill).toHaveCount(1);
+
+  await alice.page.close({ runBeforeUnload: true });
+  await expect(pill).toHaveCount(0, { timeout: 5_000 });
+  await alice.context.close();
+});

@@ -174,6 +174,7 @@ await waitFor("both players in state", () => alice.room.state.players.size === 2
 // -- 1. auth ----------------------------------------------------------------
 console.log("auth");
 check("two authenticated clients joined", alice.room.state.players.size === 2);
+check("the second arrival spawns out of earshot of the first", gapBetween(alice, bob) > PROXIMITY_EXIT, `gap=${gapBetween(alice, bob).toFixed(1)}`);
 check("player identity came from the token", self(alice).name === "Alice" && self(bob).name === "Bob");
 
 let rejected = false;
@@ -427,8 +428,16 @@ console.log("\navatars");
   dana.room.send(C2S.SetAvatar, { look: { evil: true } });
   await sleep(300);
   check("invalid looks sent to the room are ignored", self(dana).avatar === "0.0.0.0.0.0", self(dana).avatar);
+  // Leaving and coming back soon puts you where you were, not at a spawn point.
+  await holdDirection(dana, 1, 0, 300);
+  await sleep(150);
+  const spot = { x: self(dana).x, y: self(dana).y };
   await dana.room.leave(true);
   await waitFor("Dana removed", () => !alice.room.state.players.has(dana.room.sessionId));
+  const back = await joinAs("Dana");
+  check("rejoining soon after puts you back where you were", Math.hypot(self(back).x - spot.x, self(back).y - spot.y) < 1, `${JSON.stringify(spot)} -> ${self(back).x},${self(back).y}`);
+  await back.room.leave(true);
+  await waitFor("Dana removed again", () => !alice.room.state.players.has(back.room.sessionId));
 }
 
 // -- 10. reconnect ----------------------------------------------------------

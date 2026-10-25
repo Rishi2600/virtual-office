@@ -376,8 +376,12 @@ walked apart would both stay silently un-callable.
 proximity graph, so a chain A–B–C is one conversation rather than two.
 
 **Reconnect** keeps your seat for 30 seconds. Drop your WiFi and the client resumes the same
-session at the same position — no page reload. Past that window it rejoins as a new session.
-Peers see you greyed out and your calls tear down immediately rather than freezing.
+session at the same position — no page reload. Past that window it rejoins as a new session, and
+it never gives up: it keeps retrying (every 10 s at most, and at once when the network is back)
+until it's in again. Peers see you greyed out and your calls tear down immediately rather than
+freezing. Closing or reloading the tab leaves at once (no 30-second ghost), and coming back within
+10 minutes puts you where you were (kept in server memory only). New arrivals spawn out of earshot
+of everyone, so nobody lands inside someone else's conversation.
 
 ### Notable choices
 

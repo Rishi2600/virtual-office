@@ -1,7 +1,6 @@
-import { useEffect } from "react";
+import { Suspense, lazy, useEffect } from "react";
 import { useStore } from "../../store.js";
 import type { Session } from "../../net/session.js";
-import { GameCanvas } from "../../game/GameCanvas.js";
 import { meter, prune } from "../../webrtc/speaking.js";
 import { useLayout } from "../layout.js";
 import { ChatPanel } from "../chat/ChatPanel.js";
@@ -18,6 +17,10 @@ import { MapTools } from "./MapTools.js";
 import { StageBanners } from "./StageBanners.js";
 import { TopBar } from "./TopBar.js";
 import "./stage.css";
+
+/** The game engine (Phaser, the biggest part of the app) is only downloaded
+ *  once you're signed in, so the sign-in page loads fast. */
+const GameCanvas = lazy(() => import("../../game/GameCanvas.js").then((m) => ({ default: m.GameCanvas })));
 
 /** Keeps the speaking meters in step with who you can hear (and yourself). */
 function useSpeakingMeters() {
@@ -68,7 +71,9 @@ export function Office({ session, onLeave }: { session: Session | null; onLeave:
         <main className="stage" aria-label="Office map">
           {session && (
             <>
-              <GameCanvas />
+              <Suspense fallback={<div className="boot">Loading the office…</div>}>
+                <GameCanvas />
+              </Suspense>
               <MapOverlay />
               <MapTools />
             </>

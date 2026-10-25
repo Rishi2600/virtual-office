@@ -22,8 +22,11 @@ const WS_URL: string =
     ? `ws://${location.hostname}:2567`
     : `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}`);
 
-const RETRY_DELAYS_MS = [400, 900, 1800, 3000, 5000, 5000, 5000];
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+/** Waits between reconnect attempts; after the last one it keeps trying every
+ *  RETRY_EVERY_MS for as long as the page is open (a laptop waking up, a train
+ *  leaving a tunnel), and straight away when the browser says it's back online. */
+const RETRY_DELAYS_MS = [400, 900, 1800, 3000, 5000];
+const RETRY_EVERY_MS = 10_000;
 
 /** Mutable holder so the Phaser scene keeps working across a reconnect, which
  *  hands us a brand new Room object. */
@@ -48,6 +51,35 @@ export class Session {
   private iceServers: RTCIceServer[] = [];
   private iceRefreshTimer: ReturnType<typeof setTimeout> | null = null;
   private disposed = false;
+  /** Wakes a reconnect wait early (the browser came back online). */
+  private wake: (() => void) | null = null;
+
+  constructor() {
+    window.addEventListener("online", this.onOnline);
+    // Closing or reloading the tab is a deliberate leave: tell the server, so
+    // others see you go now rather than after the 30 s reconnect window.
+    window.addEventListener("pagehide", this.onPageHide);
+  }
+
+  private onOnline = () => this.wake?.();
+  private onPageHide = (e: PageTransitionEvent) => {
+    // A page kept in the back/forward cache may come back; let the normal
+    // reconnect handle that instead.
+    if (!e.persisted) void this.myRoom?.leave(true).catch(() => {});
+  };
+
+  /** Sleeps, unless woken early by the network coming back. */
+  private wait(ms: number): Promise<void> {
+    return new Promise((resolve) => {
+      const done = () => {
+        clearTimeout(t);
+        if (this.wake === done) this.wake = null;
+        resolve();
+      };
+      const t = setTimeout(done, ms);
+      this.wake = done;
+    });
+  }
 
   get room(): Room<OfficeState> | null {
     return this.myRoom;
@@ -136,9 +168,14 @@ export class Session {
     const room = this.room;
     if (!room) return;
 
+    // Called on every state patch (20 times a second while anyone walks), but
+    // positions aren't part of PlayerView: keep unchanged entries, and skip
+    // the store update entirely when nothing the UI shows has changed.
+    const prev = useStore.getState().players;
+    let changed = Object.keys(prev).length !== room.state.players.size;
     const players: Record<string, PlayerView> = {};
     room.state.players.forEach((p, sessionId) => {
-      players[sessionId] = {
+      const next: PlayerView = {
         sessionId,
         userId: p.userId,
         name: p.name,
@@ -152,8 +189,12 @@ export class Session {
         lockGroup: p.lockGroup,
         isSelf: sessionId === room.sessionId,
       };
+      const old = prev[sessionId];
+      const same = !!old && (Object.keys(next) as Array<keyof PlayerView>).every((k) => old[k] === next[k]);
+      players[sessionId] = same ? old : next;
+      if (!same) changed = true;
     });
-    useStore.getState().set({ players });
+    if (changed) useStore.getState().set({ players });
   }
 
   /**
@@ -190,14 +231,17 @@ export class Session {
       peers: {},
     });
 
-    for (let attempt = 0; attempt < RETRY_DELAYS_MS.length; attempt++) {
+    for (let attempt = 0; ; attempt++) {
       if (this.disposed) return;
-      await sleep(RETRY_DELAYS_MS[attempt]!);
+      await this.wait(RETRY_DELAYS_MS[attempt] ?? RETRY_EVERY_MS);
       if (this.disposed) return;
+      // Offline: don't burn attempts; the "online" event wakes us.
+      if (!navigator.onLine) {
+        useStore.getState().set({ connectionDetail: "You're offline. Reconnecting when the network is back…" });
+        continue;
+      }
 
-      useStore.getState().set({
-        connectionDetail: `Reconnecting… (attempt ${attempt + 1} of ${RETRY_DELAYS_MS.length})`,
-      });
+      useStore.getState().set({ connectionDetail: `Reconnecting… (attempt ${attempt + 1})` });
 
       // 1. Resume the same seat, which keeps our position and identity.
       if (this.reconnectionToken) {
@@ -219,15 +263,18 @@ export class Session {
         this.adopt(room);
         console.info("[net] rejoined with a new session");
         return;
-      } catch {
-        /* keep retrying */
+      } catch (err) {
+        // Signed out meanwhile (expired or revoked): retrying can't fix that.
+        if ((err as Error).message?.startsWith("401")) {
+          useStore.getState().set({
+            connection: "failed",
+            connectionDetail: "Your sign-in has expired. Reload to sign in again.",
+          });
+          return;
+        }
+        /* otherwise keep retrying */
       }
     }
-
-    useStore.getState().set({
-      connection: "failed",
-      connectionDetail: "Could not reconnect. Check your network, then reload.",
-    });
   }
 
   // ------------------------------------------------------------------- actions
@@ -242,18 +289,21 @@ export class Session {
     this.room?.send(C2S.Chat, { scope, text: trimmed.slice(0, CHAT_MAX_LENGTH) });
   }
 
-  /** Locks or unlocks the huddle you're currently in. */
   /** Shows a new (already saved) look to everyone at once. */
   setAvatar(look: string): void {
     this.room?.send(C2S.SetAvatar, { look });
   }
 
+  /** Locks or unlocks the huddle you're currently in. */
   setLocked(locked: boolean): void {
     this.room?.send(C2S.SetLock, { locked });
   }
 
   async disconnect(): Promise<void> {
     this.disposed = true;
+    window.removeEventListener("online", this.onOnline);
+    window.removeEventListener("pagehide", this.onPageHide);
+    this.wake?.();
     if (this.iceRefreshTimer) clearTimeout(this.iceRefreshTimer);
     this.leavingIntentionally = true;
     this.peers?.closeAll();

@@ -18,5 +18,7 @@ export default defineConfig({
   optimizeDeps: { exclude: ["@vo/shared"] },
   // "hidden": maps are written for local debugging, but the bundle doesn't
   // point at them, and the Docker image deletes them so they're never served.
-  build: { outDir: "dist", sourcemap: "hidden" },
+  // The one big chunk is Phaser (~1.2 MB, ~320 kB gzipped), loaded only after
+  // sign-in (ui/stage/Office.tsx), so the default 500 kB warning is just noise.
+  build: { outDir: "dist", sourcemap: "hidden", chunkSizeWarningLimit: 1300 },
 });
