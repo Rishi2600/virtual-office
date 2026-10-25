@@ -126,6 +126,7 @@ Both are enforced server-side, so a patched client can't force its way into eith
 | `npm run lint` | ESLint over every workspace (no warnings allowed) |
 | `npm run test:postgres` | Postgres repository + migrations against `TEST_DATABASE_URL` (it drops its tables; refuses a database whose name lacks `test`) |
 | `npm run db:up` / `db:down` / `db:reset` / `db:psql` | Local dev Postgres in Docker (`docker-compose.dev.yml`): start, stop, wipe, SQL shell |
+| `npm run turn:up` / `turn:down` | Local TURN relay (coturn) in Docker, for testing relayed calls |
 | `npm run test:e2e` | Browser tests: two Chromium tabs with fake mic, camera and screen walk into a call (needs `npx playwright install chromium` once) |
 | `npm run typecheck` | Type-check server and client without building |
 
@@ -244,17 +245,38 @@ docker compose up -d app
 
 ### TURN (for restrictive networks)
 
-STUN alone covers most networks. If people behind symmetric NAT or strict corporate firewalls
-can't connect, add a TURN server (e.g. [coturn](https://github.com/coturn/coturn)) — **env only,
-no code change and no client rebuild**:
+Calls are peer-to-peer. On most networks the browsers find a direct path with STUN's help, but
+some (strict corporate firewalls, certain NATs, networks that block UDP) won't allow it. For
+those, a **TURN relay** forwards the call's packets. The call stays end-to-end encrypted; the
+relay only passes bytes along.
+
+The Docker deployment runs one: **[coturn](https://github.com/coturn/coturn), on your own
+server** (the `turn` service in `docker-compose.yml`). Set in `.env`:
 
 ```ini
-TURN_URLS=turn:turn.yourcompany.com:3478
-TURN_USERNAME=...
-TURN_CREDENTIAL=...
+TURN_URLS=turn:your-domain:3478?transport=udp,turn:your-domain:3478?transport=tcp
+TURN_SECRET=...            # openssl rand -hex 32
 ```
 
-The client fetches ICE configuration from `/api/config` at startup.
+and open these ports in your server's firewall: **3478 UDP and TCP**, and **UDP 49152–49352**
+(one relay port per relayed call leg).
+
+How it's secured:
+
+- **No TURN passwords.** The app signs short-lived credentials (24 h by default,
+  `TURN_TTL_SEC`) for each signed-in user with `TURN_SECRET`, which coturn checks; they're handed
+  out only by `/api/ice`, behind sign-in. Browsers refresh them automatically.
+- **Can't be used as an open relay:** unsigned, forged or expired credentials are refused, and
+  per-user and total quotas apply.
+- **Can't reach your internal network:** coturn refuses to relay to private and special
+  addresses (10.x, 192.168.x, 127.x, cloud metadata, …).
+
+On a cloud host whose public IP isn't on the network interface (AWS, GCP, Azure), add
+`--external-ip=PUBLIC_IP/PRIVATE_IP` to the `turn` service (there's a note in the file). TURN
+over TLS on port 443, for networks that only allow HTTPS, is not set up yet.
+
+To try relayed calls locally: `npm run turn:up` and put the two local `TURN_…` lines from
+`.env.example` in your `.env`. Each call tile's quality dot says "via relay" when a call uses it.
 
 ---
 
@@ -379,7 +401,7 @@ Stubbed for later, with the seams already in place:
 
 | | Status |
 | --- | --- |
-| **TURN** | Env-driven; only Google STUN populated. Add URLs, no code change. |
+| **TURN** | Self-hosted coturn in the Docker deploy, with short-lived signed credentials (see TURN above). TURN over TLS/443 not yet. |
 | **Redis presence** | Single process, in-memory. Drop-in at the `new Server({...})` call in `server/src/index.ts` (marked with a TODO). |
 | **Postgres** | Written and used when `DATABASE_URL` is set; JSON file is the dev default. |
 | **SFU** | All signaling is behind `rooms/signaling.ts` + `webrtc/PeerManager.ts`; game logic never touches it. |

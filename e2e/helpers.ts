@@ -8,7 +8,10 @@ interface DevPeer { polite: boolean; pc: RTCPeerConnection }
 declare global {
   interface Window {
     __store?: {
-      getState(): { connection: string; peers: Record<string, { connectionState: string }> };
+      getState(): {
+        connection: string;
+        peers: Record<string, { connectionState: string; callStatus: string; quality: { relayed: boolean } | null }>;
+      };
     };
     __session?: {
       room: {

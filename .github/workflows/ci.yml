@@ -106,6 +106,9 @@ jobs:
   e2e:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      TURN_URLS: turn:127.0.0.1:3478?transport=udp,turn:127.0.0.1:3478?transport=tcp
+      TURN_SECRET: ci-only-turn-secret-00000000000000000000
     steps:
       - uses: actions/checkout@v7
 
@@ -116,7 +119,21 @@ jobs:
 
       - run: npm ci
       - run: npx playwright install --with-deps chromium
+
+      # A real TURN relay for e2e/turn.spec.ts (same settings as the local dev
+      # one in docker-compose.dev.yml, including relaying on localhost).
+      - name: Start coturn
+        run: |
+          docker run -d --name turn --network host coturn/coturn:4.18.0-alpine \
+            -n --listening-port=3478 --min-port=49152 --max-port=49252 \
+            --realm=virtual-office --use-auth-secret --static-auth-secret="$TURN_SECRET" \
+            --fingerprint --allow-loopback-peers --no-multicast-peers --no-tls --log-file=stdout
+
       - run: npm run test:e2e
+
+      - name: coturn logs
+        if: failure()
+        run: docker logs turn
 
       - name: Upload Playwright report
         if: failure()
