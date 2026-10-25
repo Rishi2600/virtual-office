@@ -10,6 +10,7 @@ import { PeoplePanel } from "../people/PeoplePanel.js";
 import { RemoteAudio } from "../RemoteAudio.js";
 import { SettingsDialog } from "../settings/SettingsDialog.js";
 import { FinderDialog } from "../people/FinderDialog.js";
+import { AvatarBuilder } from "../avatar/AvatarBuilder.js";
 import { Dock } from "./Dock.js";
 import { HuddleBar } from "./HuddleBar.js";
 import { MapOverlay } from "./MapOverlay.js";
@@ -90,6 +91,7 @@ export function Office({ session, onLeave }: { session: Session | null; onLeave:
       </div>
       <SettingsDialog session={session} onLeave={onLeave} />
       <FinderDialog />
+      <AvatarBuilder session={session} />
     </div>
   );
 }

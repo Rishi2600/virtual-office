@@ -98,6 +98,9 @@ bar shows unread messages); on tablets the people list shrinks to faces.
 Shortcuts work anywhere except while you're typing. **Leave office** takes you out of the space
 without signing you out; **Rejoin** brings you back.
 
+The first time you sign in you **build your avatar** (skin, hair, colours, clothes, glasses /
+headphones / cap); change it any time from **Edit avatar**. Everyone sees the change at once.
+
 Settings lets you pick your microphone, camera and speakers (remembered per browser), shows a mic
 level meter and plays a test sound. **Sounds** (a soft chime when someone joins you or messages you)
 are **off by default**, and **desktop notifications** are opt-in; a notification says who wrote,
@@ -151,7 +154,7 @@ Both are enforced server-side, so a patched client can't force its way into eith
 
 Every push runs lint, typecheck, build, `npm test`, `npm run smoke` and the browser tests in GitHub Actions
 (`.github/workflows/ci.yml`).
-| `npm run gen:tileset` | Regenerate `tiles.png` / `avatars.png` |
+| `npm run gen:tileset` | Regenerate `client/public/assets/tiles.png` (the art is drawn in code; avatars are drawn at runtime) |
 | `node scripts/gen-map.mjs` | Regenerate the office map |
 
 ### `npm test`
@@ -405,7 +408,8 @@ Peers see you greyed out and your calls tear down immediately rather than freezi
 - **The camera is only ever opened by an explicit click**, never by proximity.
 - **"Who's speaking"** (the green rings and bars) is worked out in your browser from the live volume
   level only; no audio is kept or sent anywhere for it.
-- **Stored data** is limited to user profile (name, email, avatar URL, timestamps) and space
+- **Stored data** is limited to user profile (name, email, profile picture URL, the avatar you built,
+  timestamps) and space
   metadata.
 
 The guarantee is asserted in a comment at the top of `client/src/webrtc/PeerManager.ts`, next to

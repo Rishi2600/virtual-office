@@ -39,6 +39,10 @@ export async function join(browser: Browser, label: string, init?: () => void): 
   const name = `${label}-${Math.random().toString(36).slice(2, 7)}`;
   await page.goto(`/?dev=${encodeURIComponent(name)}`);
   await page.waitForFunction(() => window.__store?.getState().connection === "connected");
+  // Everyone here is new, so the avatar builder opens on arrival: keep the
+  // suggested look, as a first-time user who isn't fussed would.
+  await page.getByRole("button", { name: "Keep this one" }).click();
+  await page.getByTestId("avatar-builder").waitFor({ state: "hidden" });
   return { name, context, page };
 }
 

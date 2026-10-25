@@ -95,6 +95,16 @@ export async function applyDevIdentityFromUrl(): Promise<boolean> {
   }
 }
 
+/** Saves the look built in the avatar builder (validated again by the server). */
+export async function saveAvatar(look: string): Promise<void> {
+  const res = await request("/api/me/avatar", {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ look }),
+  });
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+}
+
 export async function logout(): Promise<void> {
   await request("/auth/logout", { method: "POST" });
   clearDevToken();

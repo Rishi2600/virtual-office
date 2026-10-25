@@ -23,6 +23,8 @@ export interface Me {
   name: string;
   email: string;
   picture: string;
+  /** The look they built, or "" if they haven't yet (first run opens the builder). */
+  avatar: string;
 }
 
 export interface AppConfig {

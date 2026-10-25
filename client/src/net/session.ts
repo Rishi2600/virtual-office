@@ -242,6 +242,11 @@ export class Session {
   }
 
   /** Locks or unlocks the huddle you're currently in. */
+  /** Shows a new (already saved) look to everyone at once. */
+  setAvatar(look: string): void {
+    this.room?.send(C2S.SetAvatar, { look });
+  }
+
   setLocked(locked: boolean): void {
     this.room?.send(C2S.SetLock, { locked });
   }

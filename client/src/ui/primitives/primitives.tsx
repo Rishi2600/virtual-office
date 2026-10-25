@@ -182,7 +182,13 @@ export function Dialog({
   useEffect(() => {
     const d = ref.current;
     if (!d) return;
-    if (open && !d.open) d.showModal();
+    if (open && !d.open) {
+      d.showModal();
+      // Start on the dialog itself (announced by its title) rather than on the
+      // first button, which is the close button and would pop its tooltip.
+      // Dialogs that want a field focused do that themselves.
+      d.focus();
+    }
     if (!open && d.open) d.close();
   }, [open]);
   const titleId = useId();
@@ -190,6 +196,7 @@ export function Dialog({
     <dialog
       ref={ref}
       className="dialog"
+      tabIndex={-1}
       style={{ width }}
       aria-labelledby={titleId}
       data-testid={testId}
