@@ -34,7 +34,8 @@ export class FileRepository implements Repository {
     try {
       const parsed = JSON.parse(await readFile(this.file, "utf8")) as Partial<FileShape>;
       this.data = {
-        users: parsed.users ?? [],
+        // Files written before avatars existed have no `avatar` field.
+        users: (parsed.users ?? []).map((u) => ({ ...u, avatar: u.avatar ?? "" })),
         spaces: parsed.spaces?.length ? parsed.spaces : [...DEFAULT_SPACES],
       };
     } catch {
@@ -80,6 +81,7 @@ export class FileRepository implements Repository {
         email,
         name: input.name,
         picture: input.picture ?? "",
+        avatar: "",
         createdAt: now,
         lastSeenAt: now,
       };
@@ -98,6 +100,13 @@ export class FileRepository implements Repository {
     const u = this.data.users.find((x) => x.id === id);
     if (!u) return;
     u.lastSeenAt = new Date().toISOString();
+    await this.flush();
+  }
+
+  async setAvatar(id: string, look: string): Promise<void> {
+    const u = this.data.users.find((x) => x.id === id);
+    if (!u) return;
+    u.avatar = look;
     await this.flush();
   }
 

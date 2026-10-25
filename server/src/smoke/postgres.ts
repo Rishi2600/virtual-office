@@ -57,6 +57,9 @@ check("no pgcrypto extension is needed", (await q(`SELECT 1 FROM pg_extension WH
 const user = await repo.upsertUser({ email: "Ada@Example.com", name: "Ada" });
 check("users get a generated UUID (gen_random_uuid, built in)", /^[0-9a-f-]{36}$/.test(user.id), user.id);
 check("upsert + get round-trip", (await repo.getUser(user.id))?.email === "ada@example.com");
+check("a new user has no avatar yet", (await repo.getUser(user.id))?.avatar === "");
+await repo.setAvatar(user.id, "1.2.3.4.1.0");
+check("setAvatar round-trips (migration 2)", (await repo.getUser(user.id))?.avatar === "1.2.3.4.1.0");
 check("default space is seeded", (await repo.listSpaces()).some((s) => s.slug === "office"));
 await repo.ping();
 check("ping() answers", true);

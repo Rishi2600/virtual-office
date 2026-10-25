@@ -9,6 +9,9 @@ export interface Claims {
   email: string;
   name: string;
   picture: string;
+  /** The saved avatar look ("" if none); only in realtime tokens, which are
+   *  minted fresh for every join so it's never stale. */
+  avatar?: string;
   typ: TokenKind;
 }
 
@@ -18,6 +21,7 @@ function sign(user: UserRecord, typ: TokenKind, ttlSec: number): string {
     email: user.email,
     name: user.name,
     picture: user.picture,
+    ...(typ === "realtime" ? { avatar: user.avatar } : {}),
     typ,
   };
   return jwt.sign(claims, env.jwtSecret, { expiresIn: ttlSec, algorithm: "HS256" });

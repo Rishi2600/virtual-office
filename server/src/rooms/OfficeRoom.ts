@@ -8,12 +8,14 @@ import {
   type ChatInMessage,
   type ChatOutMessage,
   type ChatScope,
+  type SetAvatarMessage,
   type SetLockMessage,
   RECONNECT_WINDOW_SEC,
   S2C,
   TICK_MS,
   applyInput,
   isPolite,
+  parseLook,
   resolveLook,
   type CollisionGrid,
   type InputMessage,
@@ -83,6 +85,7 @@ export class OfficeRoom extends Room<OfficeState> {
     );
     this.onMessage(C2S.Chat, (client, msg: ChatOutMessage) => this.handleChat(client, msg));
     this.onMessage(C2S.SetLock, (client, msg: SetLockMessage) => this.handleLock(client, msg));
+    this.onMessage(C2S.SetAvatar, (client, msg: SetAvatarMessage) => this.handleAvatar(client, msg));
 
     wsLog.info({ roomId: this.roomId, mapKey }, "room created");
   }
@@ -108,7 +111,7 @@ export class OfficeRoom extends Room<OfficeState> {
     player.userId = auth.sub;
     player.name = auth.name || auth.email;
     player.picture = auth.picture ?? "";
-    player.avatar = resolveLook(undefined, auth.sub);
+    player.avatar = resolveLook(auth.avatar, auth.sub);
 
     const spawn = this.spawns[this.spawnCursor++ % this.spawns.length]!;
     player.x = spawn.x;
@@ -232,6 +235,14 @@ export class OfficeRoom extends Room<OfficeState> {
     for (const sessionId of this.proximity.clusterOf(client.sessionId)) {
       this.sendTo(sessionId, S2C.Chat, payload);
     }
+  }
+
+  /** A new look from the avatar builder, shown to everyone at once. Invalid
+   *  looks are ignored, so nobody can push something the client can't draw. */
+  private handleAvatar(client: Client, msg: SetAvatarMessage): void {
+    const player = this.state.players.get(client.sessionId);
+    if (!player || !parseLook(msg?.look)) return;
+    player.avatar = msg.look;
   }
 
   /** Locks or unlocks the sender's current huddle. */

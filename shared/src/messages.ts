@@ -9,6 +9,7 @@ export const C2S = {
   RtcFailure: "rtc-failure",
   Chat: "chat",
   SetLock: "set-lock",
+  SetAvatar: "set-avatar",
 } as const;
 
 /** server → client */
@@ -45,6 +46,11 @@ export interface ChatInMessage {
 
 export interface SetLockMessage {
   locked: boolean;
+}
+
+/** Shows a new look live; the client saves it first with PUT /api/me/avatar. */
+export interface SetAvatarMessage {
+  look: string;
 }
 
 /** Structural SDP/ICE types. Deliberately NOT the DOM's RTCSessionDescriptionInit

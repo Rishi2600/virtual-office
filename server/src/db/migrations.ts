@@ -46,4 +46,11 @@ export const MIGRATIONS: Migration[] = [
       );
     `,
   },
+  {
+    version: 2,
+    name: "users.avatar",
+    // A constant default makes this a metadata-only change (no table rewrite).
+    // "" means "not built yet": the app then derives a default from the id.
+    sql: `ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar TEXT NOT NULL DEFAULT '';`,
+  },
 ];

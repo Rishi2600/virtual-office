@@ -24,6 +24,7 @@ interface Row {
   email: string;
   name: string;
   picture: string;
+  avatar: string;
   created_at: Date;
   last_seen_at: Date;
 }
@@ -35,6 +36,7 @@ const toUser = (r: Row): UserRecord => ({
   email: r.email,
   name: r.name,
   picture: r.picture,
+  avatar: r.avatar,
   createdAt: r.created_at.toISOString(),
   lastSeenAt: r.last_seen_at.toISOString(),
 });
@@ -102,6 +104,10 @@ export class PgRepository implements Repository {
 
   async touchUser(id: string): Promise<void> {
     await this.pool.query(`UPDATE users SET last_seen_at = now() WHERE id = $1`, [id]);
+  }
+
+  async setAvatar(id: string, look: string): Promise<void> {
+    await this.pool.query(`UPDATE users SET avatar = $2 WHERE id = $1`, [id, look]);
   }
 
   async listSpaces(): Promise<SpaceRecord[]> {

@@ -391,6 +391,46 @@ check("walking away alone releases the lock automatically", released);
 await carol.room.leave(true);
 await waitFor("Carol removed", () => alice.room.state.players.size === 2);
 
+// -- 9b. avatars --------------------------------------------------------------
+console.log("\navatars");
+{
+  const res = await fetch(`${BASE}/auth/dev`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ name: "Dana" }),
+  });
+  const cookie = res.headers.getSetCookie().map((c) => c.split(";")[0]).join("; ");
+  const put = (look: unknown) =>
+    fetch(`${BASE}/api/me/avatar`, {
+      method: "PUT",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ look }),
+    });
+  const anonymous = await fetch(`${BASE}/api/me/avatar`, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ look: "1.1.1.1.1.1" }),
+  });
+  check("saving an avatar needs sign-in", anonymous.status === 401, `${anonymous.status}`);
+  check("an out-of-range look is refused", (await put("9.9.9.9.9.9")).status === 400);
+  check("a malformed look is refused", (await put("<script>")).status === 400);
+  check("a valid look is saved", (await put("4.2.5.6.3.3")).status === 200);
+  const me = (await (await fetch(`${BASE}/api/me`, { headers: { cookie } })).json()) as { avatar: string };
+  check("/api/me returns the saved look", me.avatar === "4.2.5.6.3.3", me.avatar);
+
+  const dana = await joinAs("Dana");
+  check("joining shows your saved look", self(dana).avatar === "4.2.5.6.3.3", self(dana).avatar);
+  dana.room.send(C2S.SetAvatar, { look: "0.0.0.0.0.0" });
+  const live = await waitFor("look replicated", () => alice.room.state.players.get(dana.room.sessionId)?.avatar === "0.0.0.0.0.0");
+  check("a new look shows for everyone at once", live);
+  dana.room.send(C2S.SetAvatar, { look: "7.7.7.7.7.7" });
+  dana.room.send(C2S.SetAvatar, { look: { evil: true } });
+  await sleep(300);
+  check("invalid looks sent to the room are ignored", self(dana).avatar === "0.0.0.0.0.0", self(dana).avatar);
+  await dana.room.leave(true);
+  await waitFor("Dana removed", () => !alice.room.state.players.has(dana.room.sessionId));
+}
+
 // -- 10. reconnect ----------------------------------------------------------
 console.log("\nreconnect");
 // Bring Alice back next to Bob so there is a live call to tear down.

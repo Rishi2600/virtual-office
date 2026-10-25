@@ -8,6 +8,9 @@ export interface UserRecord {
   email: string;
   name: string;
   picture: string;
+  /** Avatar look the person built ("1.1.1.0.0.2", shared/src/avatar.ts), or
+   *  "" if they haven't yet (they then get a default derived from their id). */
+  avatar: string;
   createdAt: string;
   lastSeenAt: string;
 }
@@ -34,6 +37,8 @@ export interface Repository {
   upsertUser(input: UpsertUserInput): Promise<UserRecord>;
   getUser(id: string): Promise<UserRecord | null>;
   touchUser(id: string): Promise<void>;
+  /** Saves a look the caller has already validated with parseLook. */
+  setAvatar(id: string, look: string): Promise<void>;
   listSpaces(): Promise<SpaceRecord[]>;
   getSpaceBySlug(slug: string): Promise<SpaceRecord | null>;
   /** Readiness probe: rejects if the store can't be reached. Optional because

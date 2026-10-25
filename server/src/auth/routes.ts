@@ -7,6 +7,7 @@ import { authLog } from "../log.js";
 import type { Repository, UserRecord } from "../db/index.js";
 import { signRealtimeToken, signSessionToken, verifyToken } from "./jwt.js";
 import { iceServersFor } from "./turn.js";
+import { parseLook } from "@vo/shared";
 
 const COOKIE = "vo_session";
 
@@ -232,7 +233,25 @@ export function createAuthRouter(repo: Repository): Router {
     if (!claims) return res.status(401).json({ error: "unauthenticated" });
     const user = await repo.getUser(claims.sub);
     if (!user) return res.status(401).json({ error: "unknown_user" });
-    res.json({ id: user.id, name: user.name, email: user.email, picture: user.picture });
+    res.json({ id: user.id, name: user.name, email: user.email, picture: user.picture, avatar: user.avatar });
+  });
+
+  /** Saves the look built in the avatar builder. The room is told separately
+   *  (C2S.SetAvatar) so it updates live; this makes it stick. */
+  router.put("/api/me/avatar", async (req, res) => {
+    const claims = currentUser(req);
+    if (!claims) return res.status(401).json({ error: "unauthenticated" });
+    const look: unknown = req.body?.look;
+    if (!parseLook(look)) return res.status(400).json({ error: "invalid_look" });
+    try {
+      const user = await repo.getUser(claims.sub);
+      if (!user) return res.status(401).json({ error: "unknown_user" });
+      await repo.setAvatar(user.id, look as string);
+      res.json({ avatar: look });
+    } catch (err) {
+      authLog.error({ err: (err as Error).message }, "saving avatar failed");
+      res.status(500).json({ error: "save_failed" });
+    }
   });
 
   /** Mints the short-lived token the client passes to the Colyseus handshake. */
