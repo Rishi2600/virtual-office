@@ -7,6 +7,7 @@ import { useLayout } from "../layout.js";
 import { ChatPanel } from "../chat/ChatPanel.js";
 import { PeoplePanel } from "../people/PeoplePanel.js";
 import { RemoteAudio } from "../RemoteAudio.js";
+import { SettingsDialog } from "../settings/SettingsDialog.js";
 import { Dock } from "./Dock.js";
 import { HuddleBar } from "./HuddleBar.js";
 import { MapOverlay } from "./MapOverlay.js";
@@ -84,6 +85,7 @@ export function Office({ session, onLeave }: { session: Session | null; onLeave:
           </aside>
         )}
       </div>
+      <SettingsDialog session={session} onLeave={onLeave} />
     </div>
   );
 }

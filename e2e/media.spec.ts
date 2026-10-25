@@ -33,3 +33,20 @@ test("the camera can be retried after it was denied", async ({ browser }) => {
   await expect(carol.page.getByRole("button", { name: "Turn camera off" })).toBeVisible();
   await expect(carol.page.getByText("Camera blocked in your browser")).toHaveCount(0);
 });
+
+test("picking another microphone in Settings swaps it in and is remembered", async ({ browser }) => {
+  carol = await join(browser, "Carol");
+  const page = carol.page;
+  const micLabel = () =>
+    page.evaluate(() => (window.__store?.getState() as unknown as { localStream: MediaStream | null }).localStream?.getAudioTracks()[0]?.label ?? "");
+  await expect.poll(micLabel).not.toBe("");
+
+  await page.getByRole("button", { name: "More" }).click();
+  await page.getByRole("menuitem", { name: "Settings" }).click();
+  const select = page.getByLabel("Microphone", { exact: true });
+  const second = (await select.locator("option").allTextContents())[2]!;
+  await select.selectOption({ label: second });
+
+  await expect.poll(micLabel).toBe(second);
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem("lamports:prefs") ?? "{}").micDeviceId)).not.toBe("");
+});

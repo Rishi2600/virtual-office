@@ -1,4 +1,5 @@
 import { useStore, type MediaState } from "../store.js";
+import { usePrefs } from "../prefs.js";
 
 /**
  * Microphone and camera acquisition.
@@ -29,6 +30,22 @@ const VIDEO_CONSTRAINTS: MediaTrackConstraints = {
   height: { ideal: 240 },
   frameRate: { ideal: 24 },
 };
+
+/** The device picked in Settings, if any. `exact`, because browsers may
+ *  ignore an `ideal` device and hand back the default. */
+const withDevice = (base: MediaTrackConstraints, deviceId: string): MediaTrackConstraints =>
+  deviceId ? { ...base, deviceId: { exact: deviceId } } : base;
+
+/** Opens the remembered device, or the default one if it has been unplugged. */
+async function openDevice(kind: "audio" | "video", base: MediaTrackConstraints, deviceId: string): Promise<MediaStream> {
+  try {
+    return await navigator.mediaDevices.getUserMedia({ [kind]: withDevice(base, deviceId) });
+  } catch (err) {
+    const name = (err as DOMException)?.name;
+    if (!deviceId || (name !== "OverconstrainedError" && name !== "NotFoundError")) throw err;
+    return navigator.mediaDevices.getUserMedia({ [kind]: base });
+  }
+}
 
 let audioTrack: MediaStreamTrack | null = null;
 let videoTrack: MediaStreamTrack | null = null;
@@ -76,8 +93,7 @@ export function ensureMicrophone(): Promise<MediaStreamTrack | null> {
 
   useStore.getState().set({ micState: "prompting" });
 
-  micPromise = navigator.mediaDevices
-    .getUserMedia({ audio: AUDIO_CONSTRAINTS })
+  micPromise = openDevice("audio", AUDIO_CONSTRAINTS, usePrefs.getState().micDeviceId)
     .then((stream) => {
       audioTrack = stream.getAudioTracks()[0] ?? null;
       if (audioTrack) audioTrack.enabled = useStore.getState().micOn;
@@ -105,8 +121,7 @@ export function ensureCamera(): Promise<MediaStreamTrack | null> {
 
   useStore.getState().set({ camState: "prompting" });
 
-  camPromise = navigator.mediaDevices
-    .getUserMedia({ video: VIDEO_CONSTRAINTS })
+  camPromise = openDevice("video", VIDEO_CONSTRAINTS, usePrefs.getState().camDeviceId)
     .then((stream) => {
       videoTrack = stream.getVideoTracks()[0] ?? null;
       publishStream();
@@ -145,6 +160,56 @@ export function retryMicrophone(): Promise<MediaStreamTrack | null> {
   micPromise = null;
   useStore.getState().set({ micState: "idle", mediaError: "" });
   return ensureMicrophone();
+}
+
+// ------------------------------------------------------------ device choice
+/**
+ * Switches to another microphone (from Settings) and remembers it. The caller
+ * hands the new stream to the peer manager, which swaps the track in every
+ * call without renegotiating. Returns false if that device can't be opened;
+ * the current one then stays in use.
+ */
+export async function switchMicrophone(deviceId: string): Promise<boolean> {
+  if (!audioTrack || unsupported()) {
+    // Used the next time the mic opens.
+    usePrefs.getState().setPref("micDeviceId", deviceId);
+    return true;
+  }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: withDevice(AUDIO_CONSTRAINTS, deviceId) });
+    const next = stream.getAudioTracks()[0];
+    if (!next) return false;
+    next.enabled = useStore.getState().micOn;
+    audioTrack.stop();
+    audioTrack = next;
+    micPromise = Promise.resolve(next);
+    publishStream();
+    usePrefs.getState().setPref("micDeviceId", deviceId);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Same for the camera; if it's off, the choice applies when it's next turned on. */
+export async function switchCamera(deviceId: string): Promise<boolean> {
+  if (!videoTrack || unsupported()) {
+    usePrefs.getState().setPref("camDeviceId", deviceId);
+    return true;
+  }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ video: withDevice(VIDEO_CONSTRAINTS, deviceId) });
+    const next = stream.getVideoTracks()[0];
+    if (!next) return false;
+    videoTrack.stop();
+    videoTrack = next;
+    camPromise = Promise.resolve(next);
+    publishStream();
+    usePrefs.getState().setPref("camDeviceId", deviceId);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export function stopAllMedia(): void {

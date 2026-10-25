@@ -1,0 +1,15 @@
+.level-row { display: flex; align-items: center; gap: 10px; margin-top: 8px; color: var(--text-muted); }
+.level { flex: 1; height: 8px; overflow: hidden; border-radius: 4px; background: var(--surface-3); }
+.level i { display: block; width: 0; height: 100%; background: linear-gradient(90deg, var(--success), #9df7cf); transition: width 80ms linear; }
+.cam-preview { display: block; width: 100%; max-height: 200px; margin-top: 8px; border-radius: var(--r-md); background: #000; object-fit: contain; transform: scaleX(-1); }
+.cam-off {
+  display: flex; align-items: center; justify-content: center; gap: 8px; height: 72px; margin-top: 8px;
+  border-radius: var(--r-md); border: 1px dashed var(--border-strong); background: var(--surface-2);
+  color: var(--text-muted); font-size: var(--fs-sm);
+}
+.speaker-row { display: flex; align-items: flex-end; gap: 10px; }
+.speaker-row .field { flex: 1; }
+.keys { display: grid; gap: 6px; margin: 0; font-size: var(--fs-sm); }
+.keys > div { display: flex; justify-content: space-between; gap: 18px; }
+.keys dt { color: var(--text-muted); }
+.keys dd { margin: 0; display: flex; gap: 4px; }

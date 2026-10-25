@@ -1,5 +1,17 @@
 import { useEffect, useRef } from "react";
 import { useStore } from "../store.js";
+import { usePrefs } from "../prefs.js";
+
+/** Chrome and Edge can choose the output device; elsewhere it's the system default. */
+export const canPickSpeaker = typeof HTMLMediaElement !== "undefined" && "setSinkId" in HTMLMediaElement.prototype;
+
+/** Points an audio element at the speaker picked in Settings (if the browser can). */
+export function applySpeaker(el: HTMLMediaElement, deviceId: string): void {
+  if (!canPickSpeaker) return;
+  void (el as HTMLMediaElement & { setSinkId(id: string): Promise<void> }).setSinkId(deviceId).catch(() => {
+    /* device gone: the browser keeps playing on the default */
+  });
+}
 
 /**
  * Plays one peer's voice. Kept apart from the video bubbles so hearing someone
@@ -7,6 +19,11 @@ import { useStore } from "../store.js";
  */
 function PeerAudio({ stream }: { stream: MediaStream }) {
   const ref = useRef<HTMLAudioElement>(null);
+  const speaker = usePrefs((s) => s.speakerDeviceId);
+
+  useEffect(() => {
+    if (ref.current) applySpeaker(ref.current, speaker);
+  }, [speaker]);
 
   useEffect(() => {
     const el = ref.current;
