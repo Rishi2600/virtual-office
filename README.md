@@ -398,6 +398,20 @@ The server saves each person's latest spot when they leave, every 30 seconds for
 is now inside a wall, you get a spawn point. First-time arrivals spawn out of earshot of everyone,
 so nobody lands inside someone else's conversation.
 
+**Once per person.** You can be in the office in one place at a time. Open Lamports in a second tab
+or on another computer and that one takes over from the same spot; the older tab steps out with
+"You opened Lamports somewhere else" and a **Use here** button to take it back. No duplicate
+avatars, no hearing someone twice.
+
+**One office.** Everyone shares a single office of up to 40 connections. When it's full, the next
+person is told "The office is full right now" instead of quietly landing in a second, empty office.
+
+**What clients send is checked.** Every WebSocket message is validated on the server (shape, types,
+sizes) and rebuilt field by field before anything is relayed, so only a real SDP or ICE candidate
+ever reaches another person. Each connection is rate-limited per message type (chat bursts of 8,
+then about one a second; movement, signaling and toggles have their own limits), messages are capped
+at 64 KB, and a connection that keeps flooding is disconnected.
+
 ### Notable choices
 
 - **Colyseus pinned to the 0.16 line.** The published `colyseus` 0.18 server expects

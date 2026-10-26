@@ -108,7 +108,11 @@ export class Session {
     void ensureMicrophone().then(() => this.peers?.setLocalStream(useStore.getState().localStream));
 
     await this.refreshIceServers();
-    const token = await fetchRealtimeToken();
+    const token = await fetchRealtimeToken().catch((err: Error) => {
+      // Signed out meanwhile (e.g. "Use here" after another tab signed out).
+      if (err.message.startsWith("401")) signedOut();
+      throw err;
+    });
     // Disposed meanwhile (React's development double-mount does this): don't
     // join, or this stale join would replace the live one (newest tab wins).
     if (this.disposed) return;
