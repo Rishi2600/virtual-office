@@ -33,11 +33,10 @@ jobs:
       - run: npm test
       - run: npm run smoke
 
-      # Reported but not yet blocking: the known findings are tracked in the
-      # dependency-hardening branch (audit SEC-13). Make this blocking once that lands.
+      # Blocking: fails on any high/critical advisory that isn't explicitly
+      # accepted, with its reason, in scripts/audit.mjs (audit SEC-13).
       - name: npm audit (high and above)
-        run: npm audit --audit-level=high
-        continue-on-error: true
+        run: npm run audit
 
   postgres:
     runs-on: ubuntu-latest

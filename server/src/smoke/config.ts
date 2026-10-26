@@ -6,6 +6,7 @@
  * Run: npm test (runs after the integration suite).
  */
 import { spawn } from "node:child_process";
+import http from "node:http";
 import { createHmac } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -38,6 +39,9 @@ const BLANK = {
   GITHUB_CLIENT_ID: "",
   GITHUB_CLIENT_SECRET: "",
   ALLOWED_EMAIL_DOMAIN: "",
+  GITHUB_CALLBACK_URL: "",
+  PUBLIC_URL: "",
+  TRUST_PROXY: "",
   DATABASE_URL: "",
   LOG_LEVEL: "info",
   STUN_URLS: "",
@@ -65,7 +69,46 @@ interface Outcome {
   iceSignedOutStatus?: number;
   /** GET /api/ice as the dev-signed-in probe user (development only). */
   ice?: IceResponse;
+  /** Browser-facing security (security.ts), probed from outside. */
+  security?: {
+    csp: string | null;
+    poweredBy: string | null;
+    frame: string | null;
+    corsEvil: string | null;
+    corsOwn: string | null;
+    wsEvil: number;
+    wsOwn: number;
+    joinEvil: string;
+  };
 }
+
+/** HTTP status of a WebSocket upgrade from `origin` (101 = accepted). */
+function upgradeStatus(port: string, origin: string): Promise<number> {
+  return new Promise((resolve) => {
+    const req = http.request({
+      port,
+      path: "/probe",
+      headers: {
+        Connection: "Upgrade",
+        Upgrade: "websocket",
+        "Sec-WebSocket-Version": "13",
+        "Sec-WebSocket-Key": "dGhlIHNhbXBsZSBub25jZQ==",
+        Origin: origin,
+      },
+    });
+    req.on("upgrade", (_res, socket) => (socket.destroy(), resolve(101)));
+    req.on("response", (res) => (res.resume(), resolve(res.statusCode ?? 0)));
+    req.on("error", () => resolve(0));
+    req.end();
+  });
+}
+
+/** CORS answer of the matchmaker to a preflight from `origin`. */
+const corsFor = (base: string, origin: string) =>
+  fetch(`${base}/matchmake/joinOrCreate/office`, {
+    method: "OPTIONS",
+    headers: { Origin: origin, "Access-Control-Request-Method": "POST" },
+  }).then((r) => r.headers.get("access-control-allow-origin"));
 
 /** Starts the server; if it comes up, probes it and shuts it down. */
 function boot(env: Record<string, string>): Promise<Outcome> {
@@ -99,7 +142,24 @@ function boot(env: Record<string, string>): Promise<Outcome> {
       probing = true;
       try {
         const base = `http://localhost:${port}`;
-        const config = (await fetch(`${base}/api/config`).then((r) => r.json())) as Outcome["config"];
+        const configRes = await fetch(`${base}/api/config`);
+        const config = (await configRes.json()) as Outcome["config"];
+        const own = env.PUBLIC_URL || "http://localhost:5173";
+        const security = {
+          csp: configRes.headers.get("content-security-policy"),
+          poweredBy: configRes.headers.get("x-powered-by"),
+          frame: configRes.headers.get("x-frame-options"),
+          corsEvil: await corsFor(base, "https://evil.example"),
+          corsOwn: await corsFor(base, own),
+          wsEvil: await upgradeStatus(port, "https://evil.example"),
+          wsOwn: await upgradeStatus(port, own),
+          // A non-browser client can skip CORS: the room itself checks too.
+          joinEvil: await fetch(`${base}/matchmake/joinOrCreate/office`, {
+            method: "POST",
+            headers: { Origin: "https://evil.example", "content-type": "application/json" },
+            body: JSON.stringify({ token: "x" }),
+          }).then((r) => r.text()),
+        };
         const dev = await fetch(`${base}/auth/dev`, {
           method: "POST",
           headers: { "content-type": "application/json" },
@@ -113,7 +173,7 @@ function boot(env: Record<string, string>): Promise<Outcome> {
             r.json(),
           )) as IceResponse;
         }
-        finish({ started: true, output, config, devRouteStatus: dev.status, iceSignedOutStatus, ice });
+        finish({ started: true, output, config, devRouteStatus: dev.status, iceSignedOutStatus, ice, security });
       } catch (err) {
         finish({ started: true, output: `${output}\n(probe failed: ${(err as Error).message})` });
       }
@@ -148,6 +208,20 @@ check("a safe config starts with NODE_ENV unset", o.started, o.output.slice(-400
 check("…with dev sign-in reported off", o.config?.devAuthEnabled === false);
 check("…and the dev sign-in route absent", o.devRouteStatus === 404, `status ${o.devRouteStatus}`);
 check("…and it warns that sign-in is open to any GitHub account", o.output.includes("open to ANYONE with a GitHub account"));
+const sec = o.security;
+check("…sends a strict Content-Security-Policy", !!sec?.csp?.includes("script-src 'self'") && !!sec.csp.includes("frame-ancestors 'none'"), sec?.csp ?? "none");
+check("…without X-Powered-By, and refuses to be framed", sec?.poweredBy === null && sec?.frame === "DENY");
+check("…the matchmaker gives other sites no CORS permission", sec?.corsEvil === null, `${sec?.corsEvil}`);
+check("…but answers for the office's own address", sec?.corsOwn === "http://localhost:5173", `${sec?.corsOwn}`);
+check("…and the room refuses a join sent from another site", !!sec?.joinEvil.includes("forbidden_origin"), sec?.joinEvil);
+check("…the WebSocket refuses other sites and accepts its own", sec?.wsEvil === 401 && sec?.wsOwn === 101, `evil=${sec?.wsEvil} own=${sec?.wsOwn}`);
+
+o = await boot({ JWT_SECRET: GOOD_SECRET, ...GITHUB, PUBLIC_URL: "office.example.com", TRUST_PROXY: "-1" });
+check("a PUBLIC_URL that isn't a full URL is refused", !o.started && o.output.includes("PUBLIC_URL must be a full http(s) URL"));
+check("…and so is a negative TRUST_PROXY", o.output.includes("TRUST_PROXY must be a whole number"));
+
+o = await boot({ JWT_SECRET: GOOD_SECRET, ...GITHUB, PUBLIC_URL: "https://office.example.com", PORT: "2596" });
+check("PUBLIC_URL sets the one origin allowed in", o.security?.corsOwn === "https://office.example.com" && o.security?.wsOwn === 101 && o.security?.wsEvil === 401, JSON.stringify(o.security));
 
 o = await boot({ NODE_ENV: "development", PORT: "2594" });
 check("development starts with no config at all", o.started, o.output.slice(-400));

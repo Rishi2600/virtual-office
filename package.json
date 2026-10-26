@@ -26,7 +26,8 @@
     "lint": "eslint . --max-warnings=0",
     "smoke": "npm -w @vo/server run smoke",
     "gen:tileset": "node scripts/gen-tileset.mjs",
-    "user": "npm -w @vo/server run user --"
+    "user": "npm -w @vo/server run user --",
+    "audit": "node scripts/audit.mjs"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.13.0",

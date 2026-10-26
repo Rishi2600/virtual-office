@@ -3,7 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import express from "express";
 import cookieParser from "cookie-parser";
-import { Server } from "@colyseus/core";
+import { Server, matchMaker } from "@colyseus/core";
 import { WebSocketTransport } from "@colyseus/ws-transport";
 import { assertSafeConfig, env, githubConfigured } from "./env.js";
 import { log } from "./log.js";
@@ -12,6 +12,7 @@ import { createAuthRouter } from "./auth/routes.js";
 import { OfficeRoom } from "./rooms/OfficeRoom.js";
 import { drainSpotSaves, setSpotStore } from "./rooms/spots.js";
 import { setSessionStore } from "./auth/sessions.js";
+import { matchmakerCorsHeaders, securityHeaders, verifyWebSocketOrigin } from "./security.js";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
@@ -28,7 +29,12 @@ export async function startServer(): Promise<RunningServer> {
   setSessionStore(repo);
 
   const app = express();
-  app.use(express.json({ limit: "64kb" }));
+  // Behind a reverse proxy, read the client address from X-Forwarded-For.
+  if (env.trustProxy > 0) app.set("trust proxy", env.trustProxy);
+  app.use(...securityHeaders());
+  // inflate: false: no client of ours sends compressed bodies, and refusing
+  // them removes a whole class of decompression attacks (audit SEC-13).
+  app.use(express.json({ limit: "64kb", inflate: false }));
   app.use(cookieParser());
   app.use(createAuthRouter(repo));
 
@@ -70,6 +76,8 @@ export async function startServer(): Promise<RunningServer> {
       // looks like a reconnect loop). 64KB fits any real SDP (validate.ts caps
       // it at 48KB) while keeping each message small (audit SEC-7).
       maxPayload: 64 * 1024,
+      // Only our own pages may open the office's WebSocket (audit SEC-11).
+      verifyClient: verifyWebSocketOrigin,
     }),
     // TODO(scale): single process today. To shard rooms across processes, pass
     // `presence: new RedisPresence(...)` and `driver: new RedisDriver(...)` here
@@ -82,6 +90,11 @@ export async function startServer(): Promise<RunningServer> {
     // disposed, and the last log lines were lost.
     gracefullyShutdown: false,
   });
+
+  // The matchmaker used to answer CORS for any origin, with credentials.
+  // Ours only (audit SEC-11): drop the "*" default and decide per request.
+  delete (matchMaker.controller.DEFAULT_CORS_HEADERS as Record<string, string>)["Access-Control-Allow-Origin"];
+  matchMaker.controller.getCorsHeaders = matchmakerCorsHeaders;
 
   gameServer.define("office", OfficeRoom);
 

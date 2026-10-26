@@ -40,6 +40,7 @@ import { ProximityTracker, type ProximityCandidate } from "./proximity.js";
 import { SignalingRelay } from "./signaling.js";
 import { loadSpot, saveSpots } from "./spots.js";
 import { liveSessions } from "../auth/sessions.js";
+import { originAllowed } from "../security.js";
 import { RateLimiter, type LimitKind } from "./rateLimit.js";
 import type { SpotRecord } from "../db/index.js";
 
@@ -60,6 +61,9 @@ const SPOT_SAVE_MS = 30_000;
 /** How often connected people's sign-in sessions are re-checked: signing out
  *  elsewhere or being removed disconnects you within this long. */
 const SESSION_CHECK_MS = 15_000;
+/** The office map (and the space key its saved spots are stored under). */
+const DEFAULT_MAP = "office";
+
 /** Close code for "your session ended"; the client goes to the sign-in page. */
 export const CLOSE_SIGNED_OUT = 4401;
 /** Close code for a connection that kept flooding the room with messages. */
@@ -107,7 +111,7 @@ export class OfficeRoom extends Room<OfficeState> {
 
   // ------------------------------------------------------------------ setup
   onCreate(options: { mapKey?: string }): void {
-    const mapKey = options?.mapKey ?? "office";
+    const mapKey = options?.mapKey ?? DEFAULT_MAP;
     // Colyseus creates a new room when the current one is full. Refuse
     // instead: the client says the office is full and keeps retrying.
     if (openOffices.has(mapKey)) throw new ServerError(503, "office_full");
@@ -149,15 +153,21 @@ export class OfficeRoom extends Room<OfficeState> {
   }
 
   /**
-   * Handshake gate. This runs during the WebSocket upgrade, before the client is
-   * admitted to the room — so an unauthenticated socket never reaches game
-   * state, and checking auth only on the initial HTTP request is not enough.
+   * The gate, run by the matchmaker BEFORE a seat is reserved (static onAuth;
+   * an instance-level onAuth only ran at the WebSocket step, so anyone could
+   * reserve seats with a made-up token and keep the office "full"). Whatever
+   * it returns is handed to onJoin.
    */
-  async onAuth(_client: Client, options: { token?: string }, context: AuthContext): Promise<JoinAuth> {
-    const token = options?.token ?? context?.token;
-    const claims = verifyToken(token, "realtime");
+  static async onAuth(bearer: string | undefined, options: { token?: string }, context: AuthContext): Promise<JoinAuth> {
+    // Only our own pages may join (audit SEC-11); the matchmaker's CORS and
+    // the WebSocket upgrade check this too.
+    if (!originAllowed(context?.headers?.origin)) {
+      wsLog.warn("join rejected: request from another site");
+      throw new ServerError(403, "forbidden_origin");
+    }
+    const claims = verifyToken(options?.token ?? bearer, "realtime");
     if (!claims) {
-      wsLog.warn({ ip: context?.ip }, "join rejected: invalid or expired realtime token");
+      wsLog.warn("join rejected: invalid or expired realtime token");
       throw new ServerError(401, "unauthorized");
     }
     // The realtime token is short-lived, but the session behind it may have
@@ -166,8 +176,9 @@ export class OfficeRoom extends Room<OfficeState> {
       wsLog.warn({ userId: claims.sub }, "join rejected: sign-in session has ended");
       throw new ServerError(401, "unauthorized");
     }
-    // Looked up here (onAuth may be async; onJoin stays synchronous).
-    return { ...claims, spot: await loadSpot(claims.sub, this.state.mapKey) };
+    // Looked up here (onAuth may be async; onJoin stays synchronous). There's
+    // one office map, so its saved spots are under "office".
+    return { ...claims, spot: await loadSpot(claims.sub, DEFAULT_MAP) };
   }
 
   // ------------------------------------------------------------- membership

@@ -36,6 +36,30 @@ function int(name: string, d: number): number {
   return n;
 }
 
+/** A whole number ≥ 0 (0 allowed, unlike int()). */
+function count(name: string, d: number): number {
+  const v = process.env[name];
+  if (v === undefined || v === "") return d;
+  const n = Number(v);
+  if (!Number.isInteger(n) || n < 0) {
+    problems.push(`${name} must be a whole number, 0 or more (got "${v}")`);
+    return d;
+  }
+  return n;
+}
+
+/** The origin (scheme://host[:port]) of a URL setting, or a startup error. */
+function originOf(name: string, value: string): string {
+  try {
+    const u = new URL(value);
+    if (u.protocol !== "http:" && u.protocol !== "https:") throw new Error("not http(s)");
+    return u.origin;
+  } catch {
+    problems.push(`${name} must be a full http(s) URL, like https://office.example.com (got "${value}")`);
+    return "";
+  }
+}
+
 const DEV_JWT_SECRET = "dev-only-insecure-secret-change-me";
 const MIN_JWT_SECRET_LENGTH = 32;
 
@@ -61,6 +85,21 @@ export const env = {
   githubClientId: process.env.GITHUB_CLIENT_ID ?? "",
   githubClientSecret: process.env.GITHUB_CLIENT_SECRET ?? "",
   githubCallbackUrl: str(process.env.GITHUB_CALLBACK_URL, "http://localhost:5173/auth/github/callback"),
+
+  /**
+   * The address people open Lamports at. Browsers on any other site can't
+   * talk to the office (WebSocket/matchmaker Origin check, security.ts).
+   * Optional: defaults to the origin of GITHUB_CALLBACK_URL, which already has
+   * to point at your public address. Development accepts any origin.
+   */
+  publicOrigin: originOf(
+    process.env.PUBLIC_URL ? "PUBLIC_URL" : "GITHUB_CALLBACK_URL",
+    str(process.env.PUBLIC_URL, str(process.env.GITHUB_CALLBACK_URL, "http://localhost:5173/auth/github/callback")),
+  ),
+  /** How many reverse proxies (nginx, Caddy) sit in front of the server, so
+   *  the real client address is read from X-Forwarded-For. 0 = none. Only set
+   *  it when a proxy really is there: otherwise clients could fake their IP. */
+  trustProxy: count("TRUST_PROXY", 0),
 
   /** Optional: only people with a VERIFIED GitHub email in this domain may
    *  sign in, e.g. "acme.com". Unset = anyone with a GitHub account (the

@@ -207,6 +207,15 @@ try {
 } catch { noToken = true; }
 check("join with no token is rejected", noToken);
 
+// A seat is only reserved after the token is checked (static onAuth): before,
+// the matchmaker handed out seats to made-up tokens and could be filled up.
+const bogus = await fetch(`${BASE}/matchmake/joinOrCreate/office`, {
+  method: "POST",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify({ token: "made-up" }),
+}).then((r) => r.json() as Promise<{ sessionId?: string; error?: string }>);
+check("a made-up token doesn't even get a seat reserved", !bogus.sessionId, JSON.stringify(bogus));
+
 // -- 2. movement ------------------------------------------------------------
 console.log("\nmovement");
 const startX = self(alice).x;
