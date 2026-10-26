@@ -27,7 +27,7 @@ if (!command || !email || !["block", "unblock", "signout"].includes(command)) {
 const repo = createRepository();
 await repo.init();
 setSessionStore(repo);
-let ok = true;
+let ok: boolean;
 try {
   if (command === "block") {
     const r = await blockUser(email);
