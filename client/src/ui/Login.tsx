@@ -6,15 +6,18 @@ import { drawMapPicture } from "../game/mapPicture.js";
 import { Button } from "./primitives/primitives.js";
 import "./login.css";
 
-/** OAuth failures come back as /?error=auth (server/src/auth/routes.ts). Read
- *  once, then removed from the address bar so a reload doesn't repeat it. */
-function takeAuthError(): boolean {
+/** Why you're on the sign-in page, from ?error= : "auth" when a sign-in failed
+ *  (server/src/auth/routes.ts), "signedout" when your session was ended
+ *  (net/session.ts). Read once, then removed from the address bar so a reload
+ *  doesn't repeat it. */
+function takeAuthError(): "auth" | "signedout" | null {
   const params = new URLSearchParams(location.search);
-  if (!params.has("error")) return false;
+  const error = params.get("error");
+  if (!error) return null;
   params.delete("error");
   const rest = params.toString();
   history.replaceState(null, "", location.pathname + (rest ? `?${rest}` : "") + location.hash);
-  return true;
+  return error === "signedout" ? "signedout" : "auth";
 }
 
 /** The office, softly, behind the sign-in card. */
@@ -57,7 +60,13 @@ export function Login() {
     }
   }
 
-  const shown = error || (authFailed ? "Sign-in didn't finish. Please try again." : "");
+  const shown =
+    error ||
+    (authFailed === "signedout"
+      ? "You've been signed out. Sign in again to come back."
+      : authFailed
+        ? "Sign-in didn't finish. Please try again."
+        : "");
 
   return (
     <div className="signin">

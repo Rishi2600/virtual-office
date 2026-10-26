@@ -5,6 +5,7 @@ import {
   DEFAULT_SPACES,
   type Repository,
   type SpaceRecord,
+  type SessionRecord,
   type SpotRecord,
   type UpsertUserInput,
   type UserRecord,
@@ -16,6 +17,7 @@ interface FileShape {
   spaces: SpaceRecord[];
   /** Latest spot per user and space (see Repository.saveSpots). */
   positions: Array<SpotRecord & { space: string; updatedAt: string }>;
+  sessions: SessionRecord[];
 }
 
 /**
@@ -28,7 +30,7 @@ interface FileShape {
  * so an interrupted write cannot truncate the store.
  */
 export class FileRepository implements Repository {
-  private data: FileShape = { users: [], spaces: [...DEFAULT_SPACES], positions: [] };
+  private data: FileShape = { users: [], spaces: [...DEFAULT_SPACES], positions: [], sessions: [] };
   private queue: Promise<unknown> = Promise.resolve();
 
   constructor(private readonly file: string) {}
@@ -39,9 +41,10 @@ export class FileRepository implements Repository {
       const parsed = JSON.parse(await readFile(this.file, "utf8")) as Partial<FileShape>;
       this.data = {
         // Files written before avatars existed have no `avatar` field.
-        users: (parsed.users ?? []).map((u) => ({ ...u, avatar: u.avatar ?? "" })),
+        users: (parsed.users ?? []).map((u) => ({ ...u, avatar: u.avatar ?? "", blocked: u.blocked ?? false })),
         spaces: parsed.spaces?.length ? parsed.spaces : [...DEFAULT_SPACES],
         positions: parsed.positions ?? [],
+        sessions: parsed.sessions ?? [],
       };
     } catch {
       await this.flush(); // first run: create the file
@@ -98,6 +101,7 @@ export class FileRepository implements Repository {
         name: input.name,
         picture: input.picture ?? "",
         avatar: "",
+        blocked: false,
         createdAt: now,
         lastSeenAt: now,
       };
@@ -124,6 +128,57 @@ export class FileRepository implements Repository {
     if (!u) return;
     u.avatar = look;
     await this.flush();
+  }
+
+  async findUserByEmail(email: string): Promise<UserRecord | null> {
+    const u = this.data.users.find((x) => x.email === email.toLowerCase());
+    return u ? { ...u } : null;
+  }
+
+  async setBlocked(userId: string, blocked: boolean): Promise<void> {
+    const u = this.data.users.find((x) => x.id === userId);
+    if (!u) return;
+    u.blocked = blocked;
+    await this.flush();
+  }
+
+  async createSession(s: SessionRecord): Promise<void> {
+    const now = Date.now();
+    this.data.sessions = this.data.sessions.filter((x) => x.expiresAt > now);
+    this.data.sessions.push({ ...s });
+    await this.flush();
+  }
+
+  async getSession(id: string): Promise<SessionRecord | null> {
+    const s = this.data.sessions.find((x) => x.id === id);
+    return s ? { ...s } : null;
+  }
+
+  async extendSession(id: string, expiresAt: number): Promise<void> {
+    const s = this.data.sessions.find((x) => x.id === id);
+    if (!s) return;
+    s.expiresAt = expiresAt;
+    await this.flush();
+  }
+
+  async deleteSession(id: string): Promise<void> {
+    this.data.sessions = this.data.sessions.filter((x) => x.id !== id);
+    await this.flush();
+  }
+
+  async deleteUserSessions(userId: string): Promise<number> {
+    const before = this.data.sessions.length;
+    this.data.sessions = this.data.sessions.filter((x) => x.userId !== userId);
+    await this.flush();
+    return before - this.data.sessions.length;
+  }
+
+  async liveSessions(ids: string[]): Promise<Set<string>> {
+    const now = Date.now();
+    const blocked = new Set(this.data.users.filter((u) => u.blocked).map((u) => u.id));
+    return new Set(
+      this.data.sessions.filter((s) => ids.includes(s.id) && s.expiresAt > now && !blocked.has(s.userId)).map((s) => s.id),
+    );
   }
 
   async getSpot(userId: string, space: string): Promise<{ x: number; y: number } | null> {

@@ -28,6 +28,14 @@ const WS_URL: string =
 const RETRY_DELAYS_MS = [400, 900, 1800, 3000, 5000];
 const RETRY_EVERY_MS = 10_000;
 
+/** Must match CLOSE_SIGNED_OUT in server/src/rooms/OfficeRoom.ts. */
+const CLOSE_SIGNED_OUT = 4401;
+
+/** Back to the sign-in page, which explains "You've been signed out". */
+function signedOut(): void {
+  location.href = "/?error=signedout";
+}
+
 /** Mutable holder so the Phaser scene keeps working across a reconnect, which
  *  hands us a brand new Room object. */
 export interface RoomRef {
@@ -219,6 +227,9 @@ export class Session {
   // ---------------------------------------------------------------- reconnect
   private async handleLeave(code: number): Promise<void> {
     if (this.leavingIntentionally || this.disposed) return;
+    // The server ended our sign-in session (signed out elsewhere, or removed):
+    // retrying can't help, so go back to the sign-in page and say why.
+    if (code === CLOSE_SIGNED_OUT) return signedOut();
 
     console.warn("[net] connection lost", code);
     // Tear the calls down straight away — a peer whose socket dropped is not
@@ -265,13 +276,7 @@ export class Session {
         return;
       } catch (err) {
         // Signed out meanwhile (expired or revoked): retrying can't fix that.
-        if ((err as Error).message?.startsWith("401")) {
-          useStore.getState().set({
-            connection: "failed",
-            connectionDetail: "Your sign-in has expired. Reload to sign in again.",
-          });
-          return;
-        }
+        if ((err as Error).message?.startsWith("401")) return signedOut();
         /* otherwise keep retrying */
       }
     }

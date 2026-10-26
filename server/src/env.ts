@@ -51,7 +51,8 @@ export const env = {
 
   /** The dev-only default is accepted in development and refused everywhere else. */
   jwtSecret: str(process.env.JWT_SECRET, DEV_JWT_SECRET),
-  sessionTtlSec: int("SESSION_TTL_SEC", 7 * 24 * 3600),
+  /** Sign-in sessions last this long, renewed by each visit (owner: 30 days while in use). */
+  sessionTtlSec: int("SESSION_TTL_SEC", 30 * 24 * 3600),
   /** Realtime tokens are short-lived on purpose: they are handed to the WS
    *  handshake and are useless if they leak from a log a minute later. */
   realtimeTtlSec: int("REALTIME_TTL_SEC", 120),

@@ -71,4 +71,21 @@ export const MIGRATIONS: Migration[] = [
       );
     `,
   },
+  {
+    version: 4,
+    name: "sessions and blocked users",
+    // Server-side sessions (audit SEC-5): the cookie holds a random key, and
+    // this table holds its SHA-256, so signing out or removing someone takes
+    // effect at once. blocked_at: removed people can't sign in again.
+    sql: `
+      CREATE TABLE IF NOT EXISTS sessions (
+        id         TEXT PRIMARY KEY,
+        user_id    UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        expires_at TIMESTAMPTZ NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS sessions_user_id ON sessions (user_id);
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS blocked_at TIMESTAMPTZ;
+    `,
+  },
 ];

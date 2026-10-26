@@ -25,7 +25,8 @@
     "turn:down": "docker compose -f docker-compose.dev.yml --profile turn rm -sf turn",
     "lint": "eslint . --max-warnings=0",
     "smoke": "npm -w @vo/server run smoke",
-    "gen:tileset": "node scripts/gen-tileset.mjs"
+    "gen:tileset": "node scripts/gen-tileset.mjs",
+    "user": "npm -w @vo/server run user --"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.13.0",

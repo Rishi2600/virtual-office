@@ -11,6 +11,7 @@ import { createRepository } from "./db/index.js";
 import { createAuthRouter } from "./auth/routes.js";
 import { OfficeRoom } from "./rooms/OfficeRoom.js";
 import { drainSpotSaves, setSpotStore } from "./rooms/spots.js";
+import { setSessionStore } from "./auth/sessions.js";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
@@ -24,6 +25,7 @@ export async function startServer(): Promise<RunningServer> {
   const repo = createRepository();
   await repo.init();
   setSpotStore(repo);
+  setSessionStore(repo);
 
   const app = express();
   app.use(express.json({ limit: "64kb" }));
@@ -115,6 +117,7 @@ export async function startServer(): Promise<RunningServer> {
       // database closes, so a restart puts them back where they were.
       await drainSpotSaves();
       setSpotStore(null);
+      setSessionStore(null);
       await repo.close();
     })());
 

@@ -38,7 +38,7 @@ const q = async <T extends pg.QueryResultRow = pg.QueryResultRow>(sql: string, p
 
 async function wipe(): Promise<void> {
   await admin.query(`
-    DROP TABLE IF EXISTS user_positions, users, spaces, schema_migrations CASCADE;
+    DROP TABLE IF EXISTS sessions, user_positions, users, spaces, schema_migrations CASCADE;
     DROP EXTENSION IF EXISTS pgcrypto;`);
 }
 const versions = async () => (await q<{ version: number }>("SELECT version FROM schema_migrations ORDER BY version")).map((r) => r.version);
@@ -85,6 +85,26 @@ const stolen = await repo
   .upsertUser({ provider: "github", providerId: "g3", email: "kim.new@example.com", name: "Lee" })
   .then(() => "accepted", (e: Error) => e.name);
 check("an email change onto someone else's address is refused", stolen === "IdentityConflictError", stolen);
+
+// Sessions and removal (migration 4, audit SEC-5).
+const day = 24 * 3600 * 1000;
+await repo.createSession({ id: "s-live", userId: gh1.id, expiresAt: Date.now() + day });
+await repo.createSession({ id: "s-other", userId: gh1.id, expiresAt: Date.now() + day });
+await repo.createSession({ id: "s-old", userId: adopted.id, expiresAt: Date.now() - 1000 });
+const got = await repo.getSession("s-live");
+check("a session round-trips (migration 4)", got?.userId === gh1.id && Math.abs(got.expiresAt - (Date.now() + day)) < 5000, JSON.stringify(got));
+await repo.extendSession("s-live", Date.now() + 30 * day);
+check("a session's expiry can be renewed", ((await repo.getSession("s-live"))?.expiresAt ?? 0) > Date.now() + 29 * day);
+const live = await repo.liveSessions(["s-live", "s-other", "s-old", "s-missing"]);
+check("liveSessions skips expired and unknown sessions", live.has("s-live") && live.has("s-other") && !live.has("s-old") && !live.has("s-missing"), [...live].join(","));
+await repo.setBlocked(gh1.id, true);
+check("a blocked user's sessions stop being live", (await repo.liveSessions(["s-live"])).size === 0 && (await repo.getUser(gh1.id))?.blocked === true);
+check("…and they're found by email for the admin command", (await repo.findUserByEmail("KIM.NEW@example.com"))?.id === gh1.id);
+await repo.setBlocked(gh1.id, false);
+check("unblocking makes them live again", (await repo.liveSessions(["s-live"])).has("s-live"));
+check("ending a user's sessions removes all of them", (await repo.deleteUserSessions(gh1.id)) === 2 && (await repo.getSession("s-other")) === null);
+await repo.createSession({ id: "s-new", userId: adopted.id, expiresAt: Date.now() + day });
+check("starting a session clears out expired ones", (await repo.getSession("s-old")) === null);
 check("default space is seeded", (await repo.listSpaces()).some((s) => s.slug === "office"));
 await repo.ping();
 check("ping() answers", true);

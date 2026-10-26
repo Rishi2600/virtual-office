@@ -2,47 +2,48 @@ import jwt from "jsonwebtoken";
 import { env } from "../env.js";
 import type { UserRecord } from "../db/index.js";
 
-export type TokenKind = "session" | "realtime";
+/** Only realtime tokens are JWTs now; sign-in sessions are server-side
+ *  (auth/sessions.ts). The kind is still checked, so an old session JWT from
+ *  before that change can't be used as a realtime token. */
+export type TokenKind = "realtime";
 
 export interface Claims {
   sub: string;
   email: string;
   name: string;
   picture: string;
-  /** The saved avatar look ("" if none); only in realtime tokens, which are
-   *  minted fresh for every join so it's never stale. */
+  /** The saved avatar look ("" if none), minted fresh for every join so it's never stale. */
   avatar?: string;
+  /** The sign-in session this token was minted from; the room checks it's
+   *  still alive, so signing out or removal disconnects within seconds. */
+  sid: string;
   typ: TokenKind;
 }
 
-function sign(user: UserRecord, typ: TokenKind, ttlSec: number): string {
+/**
+ * Short-lived token handed to the Colyseus WebSocket handshake. It travels in a
+ * join payload (through client-side JS), so it's scoped tightly: it expires in
+ * minutes and is tied to the sign-in session it was minted from.
+ */
+export function signRealtimeToken(user: UserRecord, sessionId: string): string {
   const claims: Claims = {
     sub: user.id,
     email: user.email,
     name: user.name,
     picture: user.picture,
-    ...(typ === "realtime" ? { avatar: user.avatar } : {}),
-    typ,
+    avatar: user.avatar,
+    sid: sessionId,
+    typ: "realtime",
   };
-  return jwt.sign(claims, env.jwtSecret, { expiresIn: ttlSec, algorithm: "HS256" });
+  return jwt.sign(claims, env.jwtSecret, { expiresIn: env.realtimeTtlSec, algorithm: "HS256" });
 }
-
-/** Long-lived, stored in an httpOnly cookie. Never leaves the browser's cookie jar. */
-export const signSessionToken = (user: UserRecord) => sign(user, "session", env.sessionTtlSec);
-
-/**
- * Short-lived token handed to the Colyseus WebSocket handshake. Separate from
- * the session cookie because it travels in a join payload (and therefore through
- * client-side JS), so it is scoped tightly and expires in minutes.
- */
-export const signRealtimeToken = (user: UserRecord) => sign(user, "realtime", env.realtimeTtlSec);
 
 /** Returns null on any failure: bad signature, expiry, or wrong token kind. */
 export function verifyToken(token: string | undefined | null, expected: TokenKind): Claims | null {
   if (!token) return null;
   try {
     const claims = jwt.verify(token, env.jwtSecret, { algorithms: ["HS256"] }) as Claims;
-    if (claims.typ !== expected) return null;
+    if (claims.typ !== expected || typeof claims.sid !== "string") return null;
     return claims;
   } catch {
     return null;

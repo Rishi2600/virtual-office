@@ -5,6 +5,7 @@ import {
   DEFAULT_SPACES,
   type Repository,
   type SpaceRecord,
+  type SessionRecord,
   type SpotRecord,
   type UpsertUserInput,
   type UserRecord,
@@ -27,6 +28,7 @@ interface Row {
   name: string;
   picture: string;
   avatar: string;
+  blocked_at: Date | null;
   created_at: Date;
   last_seen_at: Date;
 }
@@ -39,6 +41,7 @@ const toUser = (r: Row): UserRecord => ({
   name: r.name,
   picture: r.picture,
   avatar: r.avatar,
+  blocked: r.blocked_at !== null,
   createdAt: r.created_at.toISOString(),
   lastSeenAt: r.last_seen_at.toISOString(),
 });
@@ -143,6 +146,57 @@ export class PgRepository implements Repository {
 
   async setAvatar(id: string, look: string): Promise<void> {
     await this.pool.query(`UPDATE users SET avatar = $2 WHERE id = $1`, [id, look]);
+  }
+
+  async findUserByEmail(email: string): Promise<UserRecord | null> {
+    const { rows } = await this.pool.query<Row>(`SELECT * FROM users WHERE email = $1`, [email.toLowerCase()]);
+    return rows[0] ? toUser(rows[0]) : null;
+  }
+
+  async setBlocked(userId: string, blocked: boolean): Promise<void> {
+    await this.pool.query(`UPDATE users SET blocked_at = CASE WHEN $2 THEN now() ELSE NULL END WHERE id = $1`, [userId, blocked]);
+  }
+
+  async createSession(s: SessionRecord): Promise<void> {
+    // Sign-ins are rare, so this is a fine moment to forget expired sessions.
+    await this.pool.query(`DELETE FROM sessions WHERE expires_at < now()`);
+    await this.pool.query(`INSERT INTO sessions (id, user_id, expires_at) VALUES ($1, $2, to_timestamp($3 / 1000.0))`, [
+      s.id,
+      s.userId,
+      s.expiresAt,
+    ]);
+  }
+
+  async getSession(id: string): Promise<SessionRecord | null> {
+    const { rows } = await this.pool.query<{ id: string; user_id: string; expires_at: Date }>(
+      `SELECT id, user_id, expires_at FROM sessions WHERE id = $1`,
+      [id],
+    );
+    const r = rows[0];
+    return r ? { id: r.id, userId: r.user_id, expiresAt: r.expires_at.getTime() } : null;
+  }
+
+  async extendSession(id: string, expiresAt: number): Promise<void> {
+    await this.pool.query(`UPDATE sessions SET expires_at = to_timestamp($2 / 1000.0) WHERE id = $1`, [id, expiresAt]);
+  }
+
+  async deleteSession(id: string): Promise<void> {
+    await this.pool.query(`DELETE FROM sessions WHERE id = $1`, [id]);
+  }
+
+  async deleteUserSessions(userId: string): Promise<number> {
+    const { rowCount } = await this.pool.query(`DELETE FROM sessions WHERE user_id = $1`, [userId]);
+    return rowCount ?? 0;
+  }
+
+  async liveSessions(ids: string[]): Promise<Set<string>> {
+    if (ids.length === 0) return new Set();
+    const { rows } = await this.pool.query<{ id: string }>(
+      `SELECT s.id FROM sessions s JOIN users u ON u.id = s.user_id
+        WHERE s.id = ANY($1::text[]) AND s.expires_at > now() AND u.blocked_at IS NULL`,
+      [ids],
+    );
+    return new Set(rows.map((r) => r.id));
   }
 
   async getSpot(userId: string, space: string): Promise<{ x: number; y: number } | null> {

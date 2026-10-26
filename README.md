@@ -143,7 +143,7 @@ Both are enforced server-side, so a patched client can't force its way into eith
 | `npm run dev` | Shared watcher + server + client, all three |
 | `npm run build` | Type-check and build every workspace |
 | `npm start` | Run the production server (serves the built client) |
-| `npm test` | End-to-end server test (48 checks — see below), then startup-guard and graceful-shutdown checks |
+| `npm test` | Server test suites (see below): end-to-end with real clients, sessions, sign-in attacks, startup guards, shutdown, restart |
 | `npm run smoke` | Colyseus client/server compatibility check — run before upgrading any Colyseus package |
 | `npm run lint` | ESLint over every workspace (no warnings allowed) |
 | `npm run test:postgres` | Postgres repository + migrations against `TEST_DATABASE_URL` (it drops its tables; refuses a database whose name lacks `test`) |
@@ -151,18 +151,21 @@ Both are enforced server-side, so a patched client can't force its way into eith
 | `npm run turn:up` / `turn:down` | Local TURN relay (coturn) in Docker, for testing relayed calls |
 | `npm run test:e2e` | Browser tests: two Chromium tabs with fake mic, camera and screen walk into a call (needs `npx playwright install chromium` once) |
 | `npm run typecheck` | Type-check server and client without building |
+| `npm run user -- block <email>` | Remove someone: they can't sign in, and they're signed out and disconnected within seconds. Also `unblock <email>` and `signout <email>` (see [Sessions](#sessions-and-removing-someone)) |
+| `npm run gen:tileset` | Regenerate `client/public/assets/tiles.png` (the art is drawn in code; avatars are drawn at runtime) |
+| `node scripts/gen-map.mjs` | Regenerate the office map |
 
 Every push runs lint, typecheck, build, `npm test`, `npm run smoke` and the browser tests in GitHub Actions
 (`.github/workflows/ci.yml`).
-| `npm run gen:tileset` | Regenerate `client/public/assets/tiles.png` (the art is drawn in code; avatars are drawn at runtime) |
-| `node scripts/gen-map.mjs` | Regenerate the office map |
 
 ### `npm test`
 
 Boots the real server in-process and drives it with real Colyseus clients over real WebSockets,
 covering: auth handshake rejection, movement, collision, wall-sliding, proximity enter/exit,
 hysteresis, signaling authorization, chat scoping, conversation locking, focus-mode suppression,
-reconnect-with-position, saved spots, and clean leave. Then the startup-guard, shutdown and
+reconnect-with-position, saved spots, sessions (sign-out, signing out everywhere, removing someone
+kicks them live), and clean leave. Then the session-rules, sign-in (state/PKCE and account-takeover
+attacks against a fake GitHub), startup-guard, shutdown and
 **restart** suites: the restart one runs the real server twice over the same store and checks
 everyone comes back to their spot, after a clean restart (SIGTERM) and after a crash (SIGKILL,
 which waits ~32 s for the periodic save). The suites use a throwaway JSON file, or
@@ -218,6 +221,26 @@ Every sign-in uses OAuth `state` and PKCE, kept in a short-lived signed cookie i
 sign-in link or callback crafted by someone else can't log you into their account, and an
 intercepted authorization code is useless on its own. A failed or tampered sign-in brings you back to
 the sign-in page with "Sign-in didn't finish".
+
+### Sessions and removing someone
+
+You stay signed in for **30 days from your last visit**: each time you open Lamports it renews
+(`SESSION_TTL_SEC`, default 2592000). Sessions live on the server. The cookie holds only a random
+key, and the database stores just a hash of it, so:
+
+- **Sign out** really ends that session, at once. Other tabs on the same sign-in are sent to the
+  sign-in page within about 15 seconds ("You've been signed out").
+- **Removing someone** (e.g. a person leaving) takes effect immediately:
+
+  ```sh
+  npm run user -- block alice@example.com     # can't sign in; signed out and disconnected within ~15 s
+  npm run user -- unblock alice@example.com   # let them back in
+  npm run user -- signout alice@example.com   # sign them out everywhere, without blocking
+  ```
+
+  In the Docker deploy: `docker compose exec app node server/dist/cli/user.js block alice@example.com`.
+  It uses the same store as the server. With the local JSON file store, stop the server first (it
+  keeps the file in memory); Postgres has no such issue.
 
 ### Database
 

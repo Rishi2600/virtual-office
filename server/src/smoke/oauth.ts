@@ -65,6 +65,8 @@ const GH = `http://localhost:${(ghServer.address() as AddressInfo).port}`;
 // ------------------------------------------------------------- our routes
 const repo = createRepository();
 await repo.init();
+const { setSessionStore } = await import("../auth/sessions.js");
+setSessionStore(repo);
 const app = express();
 app.use(express.json());
 app.use(cookieParser());

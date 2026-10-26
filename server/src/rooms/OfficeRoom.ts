@@ -37,6 +37,7 @@ import { loadMap } from "../maps/loadMap.js";
 import { ProximityTracker, type ProximityCandidate } from "./proximity.js";
 import { SignalingRelay } from "./signaling.js";
 import { loadSpot, saveSpots } from "./spots.js";
+import { liveSessions } from "../auth/sessions.js";
 import type { SpotRecord } from "../db/index.js";
 
 /** Simulated-time allowance per client, to bound how far one burst of input can
@@ -52,6 +53,12 @@ interface InputBudget {
 /** How often the spots of people who moved are saved (see rooms/spots.ts):
  *  a crash loses at most this much walking. */
 const SPOT_SAVE_MS = 30_000;
+
+/** How often connected people's sign-in sessions are re-checked: signing out
+ *  elsewhere or being removed disconnects you within this long. */
+const SESSION_CHECK_MS = 15_000;
+/** Close code for "your session ended"; the client goes to the sign-in page. */
+export const CLOSE_SIGNED_OUT = 4401;
 
 /** What onAuth hands to onJoin: who you are, and where you last stood. */
 type JoinAuth = Claims & { spot: { x: number; y: number } | null };
@@ -70,6 +77,10 @@ export class OfficeRoom extends Room<OfficeState> {
   private spawnCursor = 0;
   /** The last spot saved per user, so only people who moved are saved again. */
   private readonly savedSpots = new Map<string, { x: number; y: number }>();
+  /** Room session id -> the sign-in session it joined with. */
+  private readonly sessionOf = new Map<string, string>();
+  /** Disconnected on purpose (session ended): no reconnect window for them. */
+  private readonly kicked = new Set<string>();
   private readonly proximity = new ProximityTracker();
   private signaling!: SignalingRelay;
   private readonly budgets = new Map<string, InputBudget>();
@@ -90,6 +101,7 @@ export class OfficeRoom extends Room<OfficeState> {
     this.setPatchRate(TICK_MS);
     this.setSimulationInterval(() => this.tick(), TICK_MS);
     this.clock.setInterval(() => this.saveMovedSpots(), SPOT_SAVE_MS);
+    this.clock.setInterval(() => void this.dropEndedSessions(), SESSION_CHECK_MS);
 
     this.signaling = new SignalingRelay(this, this.proximity);
 
@@ -119,6 +131,12 @@ export class OfficeRoom extends Room<OfficeState> {
       wsLog.warn({ ip: context?.ip }, "join rejected: invalid or expired realtime token");
       throw new ServerError(401, "unauthorized");
     }
+    // The realtime token is short-lived, but the session behind it may have
+    // been ended since it was minted (signed out, removed).
+    if (!(await liveSessions([claims.sid])).has(claims.sid)) {
+      wsLog.warn({ userId: claims.sub }, "join rejected: sign-in session has ended");
+      throw new ServerError(401, "unauthorized");
+    }
     // Looked up here (onAuth may be async; onJoin stays synchronous).
     return { ...claims, spot: await loadSpot(claims.sub, this.state.mapKey) };
   }
@@ -138,6 +156,7 @@ export class OfficeRoom extends Room<OfficeState> {
     player.x = spot.x;
     player.y = spot.y;
     this.savedSpots.set(auth.sub, { x: spot.x, y: spot.y });
+    this.sessionOf.set(client.sessionId, auth.sid);
 
     this.state.players.set(client.sessionId, player);
     this.budgets.set(client.sessionId, { remaining: BUDGET_CAP_SEC, last: Date.now() });
@@ -160,7 +179,7 @@ export class OfficeRoom extends Room<OfficeState> {
     // staring at a frozen video tile for the whole reconnect window.
     if (player) player.connected = false;
 
-    if (consented) {
+    if (consented || this.kicked.delete(client.sessionId)) {
       this.removePlayer(client.sessionId);
       return;
     }
@@ -230,7 +249,29 @@ export class OfficeRoom extends Room<OfficeState> {
     saveSpots(this.state.mapKey, moved);
   }
 
+  /** Disconnects anyone whose sign-in session has ended (signed out, removed). */
+  private async dropEndedSessions(): Promise<void> {
+    const ids = [...new Set(this.sessionOf.values())];
+    if (ids.length === 0) return;
+    let live: Set<string>;
+    try {
+      live = await liveSessions(ids);
+    } catch (err) {
+      wsLog.warn({ err: (err as Error).message }, "couldn't check sessions; trying again later");
+      return;
+    }
+    for (const client of this.clients) {
+      const sid = this.sessionOf.get(client.sessionId);
+      if (sid && !live.has(sid)) {
+        wsLog.info({ sessionId: client.sessionId }, "disconnecting: sign-in session ended");
+        this.kicked.add(client.sessionId);
+        client.leave(CLOSE_SIGNED_OUT);
+      }
+    }
+  }
+
   private removePlayer(sessionId: string): void {
+    this.sessionOf.delete(sessionId);
     const player = this.state.players.get(sessionId);
     if (player) {
       saveSpots(this.state.mapKey, [{ userId: player.userId, x: player.x, y: player.y }]);

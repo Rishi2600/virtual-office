@@ -13,6 +13,17 @@ export interface UserRecord {
   avatar: string;
   createdAt: string;
   lastSeenAt: string;
+  /** Removed from the office (npm run user -- block): can't sign in, and any
+   *  session they had is gone. */
+  blocked: boolean;
+}
+
+/** A signed-in browser. `id` is the SHA-256 of the cookie's random key: the
+ *  key itself is never stored, so a database leak doesn't hand out sessions. */
+export interface SessionRecord {
+  id: string;
+  userId: string;
+  expiresAt: number;
 }
 
 export interface SpaceRecord {
@@ -67,6 +78,21 @@ export interface Repository {
   touchUser(id: string): Promise<void>;
   /** Saves a look the caller has already validated with parseLook. */
   setAvatar(id: string, look: string): Promise<void>;
+  /** Finds a user by email (for the admin command). */
+  findUserByEmail(email: string): Promise<UserRecord | null>;
+  setBlocked(userId: string, blocked: boolean): Promise<void>;
+
+  createSession(session: SessionRecord): Promise<void>;
+  getSession(id: string): Promise<SessionRecord | null>;
+  /** Moves a session's expiry (each visit renews it). */
+  extendSession(id: string, expiresAt: number): Promise<void>;
+  deleteSession(id: string): Promise<void>;
+  /** Ends every session of a user; returns how many there were. */
+  deleteUserSessions(userId: string): Promise<number>;
+  /** Of these session ids, the ones that still exist, haven't expired and
+   *  belong to a user who isn't blocked. */
+  liveSessions(ids: string[]): Promise<Set<string>>;
+
   /** The last saved spot of a user in a space, or null if none. */
   getSpot(userId: string, space: string): Promise<{ x: number; y: number } | null>;
   /** Saves (overwrites) the latest spot of each given user in a space, in one go. */

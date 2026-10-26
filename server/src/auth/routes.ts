@@ -4,35 +4,25 @@ import { Strategy as GitHubStrategy } from "passport-github2";
 import { env, githubConfigured } from "../env.js";
 import { authLog } from "../log.js";
 import { IdentityConflictError, type Repository, type UserRecord } from "../db/index.js";
-import { signRealtimeToken, signSessionToken, verifyToken } from "./jwt.js";
+import { signRealtimeToken } from "./jwt.js";
+import { authenticate, endSession, startSession } from "./sessions.js";
 import { iceServersFor } from "./turn.js";
 import { cookieStateStore } from "./oauthState.js";
 import { parseLook } from "@vo/shared";
 
-const COOKIE = "vo_session";
-
-function setSessionCookie(res: Response, token: string) {
-  res.cookie(COOKIE, token, {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: env.isProd,
-    maxAge: env.sessionTtlSec * 1000,
-    path: "/",
-  });
-}
-
 /**
- * Resolves the caller from the session cookie, or from an Authorization bearer
- * token. The bearer path exists so two tabs in ONE browser can be two different
- * people during local testing: a cookie is shared across tabs of the same
- * origin, a sessionStorage token is not. Both carry the same signed JWT, so
- * neither is weaker than the other.
+ * Express 4 doesn't catch errors from async handlers, and an unhandled
+ * rejection stops the server (index.ts). This turns them into a 500 instead,
+ * e.g. when the database is briefly unreachable.
  */
-export function currentUser(req: Request) {
-  const header = req.headers.authorization;
-  const bearer = header?.startsWith("Bearer ") ? header.slice(7) : null;
-  return verifyToken(bearer, "session") ?? verifyToken(req.cookies?.[COOKIE], "session");
-}
+const handle =
+  (fn: (req: Request, res: Response) => Promise<unknown>) =>
+  (req: Request, res: Response): void => {
+    fn(req, res).catch((err: Error) => {
+      authLog.error({ err: err.message, path: req.path }, "request failed");
+      if (!res.headersSent) res.status(500).json({ error: "server_error" });
+    });
+  };
 
 type ProviderName = "github";
 
@@ -90,6 +80,10 @@ async function upsertFromProvider(
       name: input.name || email.split("@")[0]!,
       picture: input.picture ?? "",
     });
+    if (user.blocked) {
+      authLog.warn({ provider, userId: user.id }, "sign-in rejected: removed from the office");
+      return done(null, false, { message: "removed" });
+    }
     authLog.info({ provider, userId: user.id, email: user.email }, "oauth sign-in");
     return done(null, user);
   } catch (err) {
@@ -115,10 +109,10 @@ export function createAuthRouter(repo: Repository, options: AuthRouterOptions = 
     router.get(
       `/auth/${name}/callback`,
       passport.authenticate(name, { session: false, failureRedirect: "/?error=auth" }),
-      (req: Request, res: Response) => {
-        setSessionCookie(res, signSessionToken(req.user as UserRecord));
+      handle(async (req, res) => {
+        await startSession(res, req.user as UserRecord);
         res.redirect("/");
-      },
+      }),
     );
   }
 
@@ -177,7 +171,7 @@ export function createAuthRouter(repo: Repository, options: AuthRouterOptions = 
   // Only exists with NODE_ENV=development (env.devAuth); outside development it
   // cannot be enabled, and asking for it makes the server refuse to start.
   if (env.devAuth) {
-    router.post("/auth/dev", async (req: Request, res: Response) => {
+    router.post("/auth/dev", handle(async (req: Request, res: Response) => {
       const raw = typeof req.body?.name === "string" ? req.body.name.trim() : "";
       const name = raw.slice(0, 32);
       if (!name) return res.status(400).json({ error: "name_required" });
@@ -186,8 +180,8 @@ export function createAuthRouter(repo: Repository, options: AuthRouterOptions = 
         email: name.toLowerCase().replace(/[^a-z0-9]+/g, ".") + "@dev.local",
         name,
       });
-      const token = signSessionToken(user);
-      setSessionCookie(res, token);
+      if (user.blocked) return res.status(403).json({ error: "removed" });
+      const token = await startSession(res, user);
       authLog.info({ userId: user.id, name }, "dev sign-in");
       // `token` is returned so a tab can hold its own identity in sessionStorage
       // and not be overwritten by another tab's cookie. Dev-only route.
@@ -198,70 +192,62 @@ export function createAuthRouter(repo: Repository, options: AuthRouterOptions = 
         picture: user.picture,
         token,
       });
-    });
+    }));
   }
 
   // ----------------------------------------------------------------- Session
-  router.post("/auth/logout", (_req, res) => {
-    res.clearCookie(COOKIE, { path: "/" });
-    res.json({ ok: true });
-  });
+  /** Ends this browser's session on the server, not just its cookie. */
+  router.post(
+    "/auth/logout",
+    handle(async (req, res) => {
+      await endSession(req, res);
+      res.json({ ok: true });
+    }),
+  );
 
-  router.get("/api/me", async (req, res) => {
-    const claims = currentUser(req);
-    if (!claims) return res.status(401).json({ error: "unauthenticated" });
-    const user = await repo.getUser(claims.sub);
-    if (!user) return res.status(401).json({ error: "unknown_user" });
+  router.get("/api/me", handle(async (req, res) => {
+    const auth = await authenticate(req, res);
+    if (!auth) return res.status(401).json({ error: "unauthenticated" });
+    const { user } = auth;
     res.json({ id: user.id, name: user.name, email: user.email, picture: user.picture, avatar: user.avatar });
-  });
+  }));
 
   /** Saves the look built in the avatar builder. The room is told separately
    *  (C2S.SetAvatar) so it updates live; this makes it stick. */
-  router.put("/api/me/avatar", async (req, res) => {
-    const claims = currentUser(req);
-    if (!claims) return res.status(401).json({ error: "unauthenticated" });
+  router.put("/api/me/avatar", handle(async (req, res) => {
+    const auth = await authenticate(req, res);
+    if (!auth) return res.status(401).json({ error: "unauthenticated" });
     const look: unknown = req.body?.look;
     if (!parseLook(look)) return res.status(400).json({ error: "invalid_look" });
-    try {
-      const user = await repo.getUser(claims.sub);
-      if (!user) return res.status(401).json({ error: "unknown_user" });
-      await repo.setAvatar(user.id, look as string);
-      res.json({ avatar: look });
-    } catch (err) {
-      authLog.error({ err: (err as Error).message }, "saving avatar failed");
-      res.status(500).json({ error: "save_failed" });
-    }
-  });
+    await repo.setAvatar(auth.user.id, look as string);
+    res.json({ avatar: look });
+  }));
 
   /** Mints the short-lived token the client passes to the Colyseus handshake. */
-  router.get("/api/rt-token", async (req, res) => {
-    const claims = currentUser(req);
-    if (!claims) return res.status(401).json({ error: "unauthenticated" });
-    const user = await repo.getUser(claims.sub);
-    if (!user) return res.status(401).json({ error: "unknown_user" });
-    res.json({ token: signRealtimeToken(user), expiresIn: env.realtimeTtlSec });
-  });
+  router.get("/api/rt-token", handle(async (req, res) => {
+    const auth = await authenticate(req, res);
+    if (!auth) return res.status(401).json({ error: "unauthenticated" });
+    res.json({ token: signRealtimeToken(auth.user, auth.sessionId), expiresIn: env.realtimeTtlSec });
+  }));
 
   /** ICE servers for the signed-in user, with fresh short-lived TURN
    *  credentials when a TURN server is configured. Behind sign-in so nobody can
    *  use the relay anonymously (it would otherwise be a free open relay). */
-  router.get("/api/ice", async (req, res) => {
-    const claims = currentUser(req);
-    if (!claims) return res.status(401).json({ error: "unauthenticated" });
-    const user = await repo.getUser(claims.sub);
-    if (!user) return res.status(401).json({ error: "unknown_user" });
-    res.set("Cache-Control", "no-store").json(iceServersFor(user.id));
-  });
+  router.get("/api/ice", handle(async (req, res) => {
+    const auth = await authenticate(req, res);
+    if (!auth) return res.status(401).json({ error: "unauthenticated" });
+    res.set("Cache-Control", "no-store").json(iceServersFor(auth.user.id));
+  }));
 
   /** Public client bootstrap (what the sign-in screen needs). No ICE servers
    *  here: those come from /api/ice after sign-in. */
-  router.get("/api/config", async (_req, res) => {
+  router.get("/api/config", handle(async (_req, res) => {
     res.json({
       githubEnabled: githubConfigured(),
       devAuthEnabled: env.devAuth,
       spaces: await repo.listSpaces(),
     });
-  });
+  }));
 
   return router;
 }

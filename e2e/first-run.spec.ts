@@ -51,3 +51,20 @@ test("Leave office, then Rejoin: back in, and the map still works", async ({ bro
   await expect.poll(x).toBeGreaterThan(before + 20);
   await leave(me);
 });
+
+test("signing out in one tab signs that session out in the others too", async ({ browser }) => {
+  // Tab A signs in (dev sign-in also sets the session cookie); tab B, in the
+  // same browser, uses that cookie: the same session.
+  const a = await join(browser, "Twotabs");
+  const b = await a.context.newPage();
+  await b.goto("/");
+  await b.waitForFunction(() => window.__store?.getState().connection === "connected");
+
+  await a.page.getByRole("button", { name: /^Account/ }).click();
+  await a.page.getByRole("menuitem", { name: "Sign out" }).click();
+
+  // The room re-checks sessions every 15 s; B is sent to the sign-in page.
+  await expect(b.getByRole("alert")).toContainText("You've been signed out", { timeout: 25_000 });
+  await expect(b.getByRole("heading", { name: /one walk away/ })).toBeVisible();
+  await a.context.close();
+});

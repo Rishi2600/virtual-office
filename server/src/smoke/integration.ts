@@ -45,6 +45,8 @@ import {
 const { startServer } = await import("../index.js");
 // Same module instance as the server's (in-process), to plant a saved spot.
 const { saveSpots, drainSpotSaves } = await import("../rooms/spots.js");
+// Same instance as the server's, to remove people the way the admin command does.
+const { blockUser, unblockUser, signOutEverywhere } = await import("../auth/sessions.js");
 
 const PORT = Number(process.env.PORT);
 const BASE = `http://localhost:${PORT}`;
@@ -463,6 +465,64 @@ console.log("\navatars");
   check("a saved spot inside a wall gives a spawn point instead", Math.hypot(self(walled).x - 16, self(walled).y - 16) > TILE_SIZE, `${self(walled).x},${self(walled).y}`);
   await walled.room.leave(true);
   await waitFor("Dana removed a third time", () => !alice.room.state.players.has(walled.room.sessionId));
+}
+
+// -- 9c. sessions ------------------------------------------------------------
+console.log("\nsessions");
+{
+  /** Dev sign-in; returns the session cookie. */
+  const cookieFor = async (name: string) => {
+    const res = await fetch(`${BASE}/auth/dev`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name }),
+    });
+    return { status: res.status, cookie: res.headers.getSetCookie().map((c) => c.split(";")[0]).join("; ") };
+  };
+  const me = (cookie: string) => fetch(`${BASE}/api/me`, { headers: { cookie } }).then((r) => r.status);
+  const rtToken = (cookie: string) =>
+    fetch(`${BASE}/api/rt-token`, { headers: { cookie } }).then(async (r) => (r.ok ? ((await r.json()) as { token: string }).token : null));
+  const enter = async (cookie: string) => {
+    const room = await new Client(WS).joinOrCreate<OfficeState>("office", { token: await rtToken(cookie) }, OfficeState);
+    let closed: number | null = null;
+    room.onLeave((code) => (closed = code));
+    room.onError(() => {});
+    return { room, closed: () => closed };
+  };
+
+  // Signing out really ends the session: the same cookie is useless afterwards.
+  const { cookie: erin } = await cookieFor("Erin");
+  check("a fresh session works", (await me(erin)) === 200);
+  const tokenBeforeLogout = await rtToken(erin);
+  await fetch(`${BASE}/auth/logout`, { method: "POST", headers: { cookie: erin } });
+  check("after signing out, that session cookie is refused", (await me(erin)) === 401 && (await rtToken(erin)) === null);
+  const lateJoin = await new Client(WS)
+    .joinOrCreate<OfficeState>("office", { token: tokenBeforeLogout }, OfficeState)
+    .then((r) => (void r.leave(true), "joined"), () => "refused");
+  check("a realtime token minted before signing out can't join", lateJoin === "refused", lateJoin);
+  check("an unknown session key is refused", (await me("vo_session=not-a-real-session")) === 401);
+
+  // Signing out everywhere ends every device; blocking also kicks and keeps out.
+  // (The test database outlives runs: make sure an interrupted run left Finn unblocked.)
+  await unblockUser("finn@dev.local");
+  const laptop = (await cookieFor("Gil")).cookie;
+  const phone = (await cookieFor("Gil")).cookie;
+  const gil = await enter(laptop);
+  const finnCookie = (await cookieFor("Finn")).cookie;
+  const finn = await enter(finnCookie);
+  await waitFor("both in the room", () => alice.room.state.players.has(gil.room.sessionId) && alice.room.state.players.has(finn.room.sessionId));
+  const out = await signOutEverywhere("gil@dev.local");
+  const removed = await blockUser("finn@dev.local");
+  check("signing out everywhere ends every session of that person", (out?.sessions ?? 0) >= 2 && (await me(laptop)) === 401 && (await me(phone)) === 401, JSON.stringify(out));
+  check("removing someone ends their sessions at once", (removed?.sessions ?? 0) >= 1 && (await me(finnCookie)) === 401);
+  const kicked = await waitFor("both disconnected by the room's session check", () => gil.closed() === 4401 && finn.closed() === 4401, 20_000);
+  check("people whose session ended are disconnected within ~15 s", kicked, `gil=${gil.closed()} finn=${finn.closed()}`);
+  // Within a second (the next state patch), not after the 30 s reconnect window.
+  const gone = await waitFor("kicked people removed", () => !alice.room.state.players.has(gil.room.sessionId) && !alice.room.state.players.has(finn.room.sessionId), 1000);
+  check("…and vanish at once, with no reconnect ghost", gone);
+  check("a removed person can't sign in again", (await cookieFor("Finn")).status === 403);
+  await unblockUser("finn@dev.local");
+  check("…until they're let back in", (await cookieFor("Finn")).status === 200);
 }
 
 // -- 10. reconnect ----------------------------------------------------------
