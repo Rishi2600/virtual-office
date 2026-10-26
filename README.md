@@ -446,8 +446,13 @@ at 64 KB, and a connection that keeps flooding is disconnected.
 - **Nothing is recorded.** No audio, video, screen content, transcripts, or chat are captured,
   buffered, or persisted — anywhere. There is no `MediaRecorder`, no canvas capture, no upload path,
   and no media endpoint in this codebase.
-- **Media never reaches the server.** Calls are a peer-to-peer WebRTC mesh; the server relays only
-  SDP and ICE candidates (`server/src/rooms/signaling.ts`).
+- **Media never reaches the app server.** Calls are a peer-to-peer WebRTC mesh; the server relays
+  only SDP and ICE candidates (`server/src/rooms/signaling.ts`). When a network blocks direct calls,
+  the media goes through your own TURN relay instead, still end-to-end encrypted (DTLS-SRTP): the
+  relay forwards packets it can't decrypt.
+- **People in a call can see each other's network address.** That's how peer-to-peer calls work:
+  your browser tells the people you're talking to the IP addresses they can reach you on. Only the
+  people the server lets you call (those standing next to you) get them.
 - **Chat is relay-only.** Messages are never written to the database and never put into the
   synchronised room state — the server forwards them and forgets them, and they live in browser
   memory until you reload.
@@ -456,7 +461,13 @@ at 64 KB, and a connection that keeps flooding is disconnected.
   level only; no audio is kept or sent anywhere for it.
 - **Stored data** is limited to user profile (name, email, profile picture URL, the avatar you built,
   timestamps), **where you last stood in the office** (your latest spot only, overwritten each time,
-  no history; so a restart puts you back), and space metadata.
+  no history; so a restart puts you back), sign-in sessions (a hash of each session key and when it
+  expires; whether someone has been removed), and space metadata.
+- **Server logs name nobody.** People appear only as an internal id (look it up in the database if
+  you need to know who it was), never by name, email or IP address; chat and call contents are never
+  logged, and the logger blanks personal fields as a safety net. In the Docker deploy, logs are
+  rotated by size and keep roughly the last two weeks. The TURN relay's own log is switched off,
+  because it would record IP addresses.
 
 The guarantee is asserted in a comment at the top of `client/src/webrtc/PeerManager.ts`, next to
 the only media APIs the app calls.

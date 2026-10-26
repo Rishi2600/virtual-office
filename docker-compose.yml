@@ -2,10 +2,20 @@
 # Put nginx or Caddy in front for TLS — browsers only grant camera, microphone
 # and screen capture on a secure origin. The TURN relay is reached directly,
 # not through the proxy; see README "TURN" for the firewall ports to open.
+# Logs are kept small and short (owner decision): each service keeps at most
+# 4 files of 5 MB, roughly the last two weeks for a ~20-person office. Docker
+# rotates by size, not by date, so busier offices keep fewer days.
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "5m"
+    max-file: "4"
+
 services:
   db:
     image: postgres:17-alpine
     restart: unless-stopped
+    logging: *logging
     environment:
       POSTGRES_USER: vo
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
@@ -21,6 +31,7 @@ services:
   app:
     build: .
     restart: unless-stopped
+    logging: *logging
     # Small init process as PID 1: forwards signals and reaps zombies.
     init: true
     depends_on:
@@ -57,6 +68,7 @@ services:
   turn:
     image: coturn/coturn:4.18.0-alpine
     restart: unless-stopped
+    logging: *logging
     # Host networking: coturn needs the server's public IP and a whole UDP port
     # range; publishing that range through Docker's NAT is slow and fragile.
     network_mode: host
@@ -91,7 +103,12 @@ services:
       - --denied-peer-ip=fe80::-febf:ffff:ffff:ffff:ffff:ffff:ffff:ffff
       # Plain UDP/TCP on 3478 for now; TURN over TLS on 443 is an add-on (README).
       - --no-tls
-      - --log-file=stdout
+      # coturn logs every relayed connection with the person's IP address, and
+      # has no setting to leave addresses out; logs never name people by IP
+      # (owner decision), so its routine log is discarded. A failed start still
+      # shows: the container exits and its status says so.
+      - --log-file=/dev/null
+      - --no-stdout-log
       # On a cloud host whose public IP isn't on the network interface (AWS,
       # GCP, Azure), also add:  - --external-ip=PUBLIC_IP/PRIVATE_IP
 

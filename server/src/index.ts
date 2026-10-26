@@ -68,6 +68,8 @@ export async function startServer(): Promise<RunningServer> {
 
   const httpServer = http.createServer(app);
   const gameServer = new Server({
+    // No ASCII banner in the logs on every start (audit OBS-2).
+    greet: false,
     transport: new WebSocketTransport({
       server: httpServer,
       // Colyseus defaults maxPayload to 4KB, far too small for WebRTC

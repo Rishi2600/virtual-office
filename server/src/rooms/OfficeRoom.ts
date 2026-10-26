@@ -213,7 +213,7 @@ export class OfficeRoom extends Room<OfficeState> {
     this.budgets.set(client.sessionId, { remaining: BUDGET_CAP_SEC, last: Date.now() });
 
     wsLog.info(
-      { sessionId: client.sessionId, userId: auth.sub, name: player.name, clients: this.clients.length },
+      { sessionId: client.sessionId, userId: auth.sub, clients: this.clients.length },
       "client connected",
     );
   }
@@ -221,7 +221,7 @@ export class OfficeRoom extends Room<OfficeState> {
   async onLeave(client: Client, consented?: boolean): Promise<void> {
     const player = this.state.players.get(client.sessionId);
     wsLog.info(
-      { sessionId: client.sessionId, consented: !!consented, name: player?.name },
+      { sessionId: client.sessionId, userId: player?.userId, consented: !!consented },
       "client disconnected",
     );
 

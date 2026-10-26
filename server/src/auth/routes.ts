@@ -69,7 +69,7 @@ async function upsertFromProvider(
 
     // Optional organisation restriction, on the verified address only.
     if (env.allowedEmailDomain && !email.endsWith("@" + env.allowedEmailDomain)) {
-      authLog.warn({ provider, email }, "sign-in rejected: email domain not allowed");
+      authLog.warn({ provider, providerId: input.id }, "sign-in rejected: email domain not allowed");
       return done(null, false, { message: "domain not allowed" });
     }
 
@@ -84,7 +84,7 @@ async function upsertFromProvider(
       authLog.warn({ provider, userId: user.id }, "sign-in rejected: removed from the office");
       return done(null, false, { message: "removed" });
     }
-    authLog.info({ provider, userId: user.id, email: user.email }, "oauth sign-in");
+    authLog.info({ provider, userId: user.id }, "oauth sign-in");
     return done(null, user);
   } catch (err) {
     if (err instanceof IdentityConflictError) {
@@ -182,7 +182,7 @@ export function createAuthRouter(repo: Repository, options: AuthRouterOptions = 
       });
       if (user.blocked) return res.status(403).json({ error: "removed" });
       const token = await startSession(res, user);
-      authLog.info({ userId: user.id, name }, "dev sign-in");
+      authLog.info({ userId: user.id }, "dev sign-in");
       // `token` is returned so a tab can hold its own identity in sessionStorage
       // and not be overwritten by another tab's cookie. Dev-only route.
       res.json({
