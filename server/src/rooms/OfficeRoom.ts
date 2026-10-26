@@ -1,16 +1,12 @@
 import { Room, ServerError, type AuthContext, type Client } from "@colyseus/core";
 import {
   C2S,
-  CHAT_MAX_LENGTH,
   MAX_INPUT_DT,
   PROXIMITY_EXIT,
   OfficeState,
   Player,
   type ChatInMessage,
-  type ChatOutMessage,
   type ChatScope,
-  type SetAvatarMessage,
-  type SetLockMessage,
   RECONNECT_WINDOW_SEC,
   S2C,
   TICK_MS,
@@ -20,16 +16,22 @@ import {
   PLAYER_FEET_OFFSET,
   PLAYER_HALF_H,
   PLAYER_HALF_W,
+  parseAvatarMessage,
+  parseChat,
+  parseInput,
+  parseLock,
   parseLook,
+  parseMedia,
+  parseRtcFailure,
+  parseSignal,
+  parseStatus,
   resolveLook,
   type CollisionGrid,
   type InputMessage,
+  type PlayerStatus,
   type ProximityEnterMessage,
   type ProximityExitMessage,
-  type RtcFailureMessage,
   type SetMediaMessage,
-  type SetStatusMessage,
-  type SignalOutMessage,
 } from "@vo/shared";
 import { verifyToken, type Claims } from "../auth/jwt.js";
 import { proximityLog, wsLog } from "../log.js";
@@ -38,6 +40,7 @@ import { ProximityTracker, type ProximityCandidate } from "./proximity.js";
 import { SignalingRelay } from "./signaling.js";
 import { loadSpot, saveSpots } from "./spots.js";
 import { liveSessions } from "../auth/sessions.js";
+import { RateLimiter, type LimitKind } from "./rateLimit.js";
 import type { SpotRecord } from "../db/index.js";
 
 /** Simulated-time allowance per client, to bound how far one burst of input can
@@ -59,6 +62,14 @@ const SPOT_SAVE_MS = 30_000;
 const SESSION_CHECK_MS = 15_000;
 /** Close code for "your session ended"; the client goes to the sign-in page. */
 export const CLOSE_SIGNED_OUT = 4401;
+/** Close code for a connection that kept flooding the room with messages. */
+export const CLOSE_FLOODING = 4429;
+/** Close code for "you opened Lamports somewhere else" (newest tab wins). */
+export const CLOSE_REPLACED = 4409;
+
+/** Only one office per map: a second one would split the team into two
+ *  offices that can't see each other (audit OPS-8). */
+const openOffices = new Set<string>();
 
 /** What onAuth hands to onJoin: who you are, and where you last stood. */
 type JoinAuth = Claims & { spot: { x: number; y: number } | null };
@@ -86,10 +97,22 @@ export class OfficeRoom extends Room<OfficeState> {
   private readonly budgets = new Map<string, InputBudget>();
   private chatSeq = 0;
   private lockSeq = 0;
+  private mapKey = "office";
+  /** Connections in their reconnect window, so a newer tab can cancel it. */
+  private readonly reconnecting = new Map<string, ReturnType<Room["allowReconnection"]>>();
+  /** Per connection: rate limits for its messages. */
+  private readonly limiters = new Map<string, RateLimiter>();
+  /** When each (connection, type, reason) last logged a dropped message. */
+  private readonly droppedLogged = new Map<string, number>();
 
   // ------------------------------------------------------------------ setup
   onCreate(options: { mapKey?: string }): void {
     const mapKey = options?.mapKey ?? "office";
+    // Colyseus creates a new room when the current one is full. Refuse
+    // instead: the client says the office is full and keeps retrying.
+    if (openOffices.has(mapKey)) throw new ServerError(503, "office_full");
+    openOffices.add(mapKey);
+    this.mapKey = mapKey;
     const loaded = loadMap(mapKey);
     this.grid = loaded.grid;
     this.spawns = loaded.spawns;
@@ -105,16 +128,22 @@ export class OfficeRoom extends Room<OfficeState> {
 
     this.signaling = new SignalingRelay(this, this.proximity);
 
-    this.onMessage(C2S.Input, (client, msg: InputMessage) => this.handleInput(client, msg));
-    this.onMessage(C2S.SetStatus, (client, msg: SetStatusMessage) => this.handleStatus(client, msg));
-    this.onMessage(C2S.SetMedia, (client, msg: SetMediaMessage) => this.handleMedia(client, msg));
-    this.onMessage(C2S.Signal, (client, msg: SignalOutMessage) => this.signaling.relay(client, msg));
-    this.onMessage(C2S.RtcFailure, (client, msg: RtcFailureMessage) =>
-      this.signaling.reportFailure(client, msg),
-    );
-    this.onMessage(C2S.Chat, (client, msg: ChatOutMessage) => this.handleChat(client, msg));
-    this.onMessage(C2S.SetLock, (client, msg: SetLockMessage) => this.handleLock(client, msg));
-    this.onMessage(C2S.SetAvatar, (client, msg: SetAvatarMessage) => this.handleAvatar(client, msg));
+    // Every client message goes through `on`: rate limit, then a strict shape
+    // check (shared/src/validate.ts), then the handler with a clean object.
+    this.on(C2S.Input, "input", parseInput, (c, m) => this.handleInput(c, m));
+    this.on(C2S.SetStatus, "control", parseStatus, (c, m) => this.handleStatus(c, m));
+    this.on(C2S.SetMedia, "control", parseMedia, (c, m) => this.handleMedia(c, m));
+    this.on(C2S.Signal, "signal", parseSignal, (c, m) => this.signaling.relay(c, m));
+    this.on(C2S.RtcFailure, "report", parseRtcFailure, (c, m) => this.signaling.reportFailure(c, m));
+    this.on(C2S.Chat, "chat", parseChat, (c, m) => this.handleChat(c, m));
+    this.on(C2S.SetLock, "control", parseLock, (c, m) => this.handleLock(c, m));
+    this.on(C2S.SetAvatar, "control", parseAvatarMessage, (c, m) => this.handleAvatar(c, m));
+    // Anything else is dropped quietly (Colyseus would log every one).
+    this.onMessage("*", (client, type) => {
+      if (this.kicked.has(client.sessionId)) return;
+      this.limiters.get(client.sessionId)?.allow("control");
+      this.noteDropped(client, String(type).slice(0, 32), "unknown type");
+    });
 
     wsLog.info({ roomId: this.roomId, mapKey }, "room created");
   }
@@ -143,6 +172,15 @@ export class OfficeRoom extends Room<OfficeState> {
 
   // ------------------------------------------------------------- membership
   onJoin(client: Client, _options: unknown, auth: JoinAuth): void {
+    // Newest tab wins (owner decision): the same person's older connection
+    // leaves, and the new one carries on from where it stood.
+    let takeover: { x: number; y: number } | null = null;
+    this.state.players.forEach((p, sessionId) => {
+      if (p.userId !== auth.sub || sessionId === client.sessionId) return;
+      takeover ??= { x: p.x, y: p.y };
+      this.replace(sessionId);
+    });
+
     const player = new Player();
     player.userId = auth.sub;
     player.name = auth.name || auth.email;
@@ -152,11 +190,13 @@ export class OfficeRoom extends Room<OfficeState> {
     // Back where you last stood, always (owner decision), even if that's in
     // someone's conversation: after a restart, that's the point. Only a spot
     // that is no longer walkable (the map changed) falls back to a spawn.
-    const spot = auth.spot && this.isStandable(auth.spot) ? auth.spot : this.pickSpawn();
+    const saved = takeover ?? auth.spot;
+    const spot = saved && this.isStandable(saved) ? saved : this.pickSpawn();
     player.x = spot.x;
     player.y = spot.y;
     this.savedSpots.set(auth.sub, { x: spot.x, y: spot.y });
     this.sessionOf.set(client.sessionId, auth.sid);
+    this.limiters.set(client.sessionId, new RateLimiter());
 
     this.state.players.set(client.sessionId, player);
     this.budgets.set(client.sessionId, { remaining: BUDGET_CAP_SEC, last: Date.now() });
@@ -184,8 +224,10 @@ export class OfficeRoom extends Room<OfficeState> {
       return;
     }
 
+    const reconnection = this.allowReconnection(client, RECONNECT_WINDOW_SEC);
+    this.reconnecting.set(client.sessionId, reconnection);
     try {
-      await this.allowReconnection(client, RECONNECT_WINDOW_SEC);
+      await reconnection;
       const rejoined = this.state.players.get(client.sessionId);
       if (rejoined) rejoined.connected = true;
       // Reset the input budget: the client has been away, and banked wall-clock
@@ -193,12 +235,30 @@ export class OfficeRoom extends Room<OfficeState> {
       this.budgets.set(client.sessionId, { remaining: BUDGET_CAP_SEC, last: Date.now() });
       wsLog.info({ sessionId: client.sessionId }, "client reconnected");
     } catch {
-      wsLog.info({ sessionId: client.sessionId }, "reconnect window expired");
+      wsLog.info({ sessionId: client.sessionId }, "reconnect window ended");
       this.removePlayer(client.sessionId);
+    } finally {
+      this.reconnecting.delete(client.sessionId);
     }
   }
 
+  /** Takes an older connection of someone out of the office because they
+   *  joined again (newest tab wins). Their tab is told why (4409) and offers
+   *  "Use here"; no reconnect window, so there's never a duplicate. */
+  private replace(sessionId: string): void {
+    wsLog.info({ sessionId }, "replaced by a newer connection of the same person");
+    const old = this.clients.getById(sessionId);
+    if (old) {
+      this.kicked.add(sessionId);
+      old.leave(CLOSE_REPLACED);
+    } else {
+      this.reconnecting.get(sessionId)?.reject(new Error("replaced"));
+    }
+    this.removePlayer(sessionId);
+  }
+
   onDispose(): void {
+    openOffices.delete(this.mapKey);
     // Anyone still here (shutdown, or a reconnect window cut short): keep their spot.
     const left: SpotRecord[] = [];
     this.state.players.forEach((p) => left.push({ userId: p.userId, x: p.x, y: p.y }));
@@ -272,6 +332,8 @@ export class OfficeRoom extends Room<OfficeState> {
 
   private removePlayer(sessionId: string): void {
     this.sessionOf.delete(sessionId);
+    this.limiters.delete(sessionId);
+    for (const key of this.droppedLogged.keys()) if (key.startsWith(`${sessionId}|`)) this.droppedLogged.delete(key);
     const player = this.state.players.get(sessionId);
     if (player) {
       saveSpots(this.state.mapKey, [{ userId: player.userId, x: player.x, y: player.y }]);
@@ -282,9 +344,41 @@ export class OfficeRoom extends Room<OfficeState> {
   }
 
   // ---------------------------------------------------------------- messages
+  private on<T>(type: string, kind: LimitKind, parse: (raw: unknown) => T | null, handle: (client: Client, msg: T) => void): void {
+    this.onMessage(type, (client, raw: unknown) => {
+      const limiter = this.limiters.get(client.sessionId);
+      // No limiter: not (or no longer) in the room, e.g. already told to
+      // leave while its queued messages are still arriving.
+      if (!limiter || this.kicked.has(client.sessionId)) return;
+      if (!limiter.allow(kind)) {
+        if (limiter.flooding()) {
+          wsLog.warn({ sessionId: client.sessionId, type }, "disconnecting: flooding the room with messages");
+          this.kicked.add(client.sessionId);
+          client.leave(CLOSE_FLOODING);
+          return;
+        }
+        this.noteDropped(client, type, "rate limit");
+        return;
+      }
+      const msg = parse(raw);
+      if (msg === null) return this.noteDropped(client, type, "invalid");
+      handle(client, msg);
+    });
+  }
+
+  /** Logs a dropped message at most once every 10 s per connection, type and
+   *  reason, so a flood can't fill the log either. */
+  private noteDropped(client: Client, type: string, reason: string): void {
+    const key = `${client.sessionId}|${type}|${reason}`;
+    const now = Date.now();
+    if (now - (this.droppedLogged.get(key) ?? 0) < 10_000) return;
+    this.droppedLogged.set(key, now);
+    wsLog.warn({ sessionId: client.sessionId, type, reason }, "client message dropped");
+  }
+
   private handleInput(client: Client, msg: InputMessage): void {
     const player = this.state.players.get(client.sessionId);
-    if (!player || !msg) return;
+    if (!player) return;
 
     const budget = this.budgets.get(client.sessionId);
     if (!budget) return;
@@ -293,22 +387,21 @@ export class OfficeRoom extends Room<OfficeState> {
     budget.remaining = Math.min(budget.remaining + (now - budget.last) / 1000, BUDGET_CAP_SEC);
     budget.last = now;
 
-    const dt = Math.min(Math.max(msg.dt ?? 0, 0), MAX_INPUT_DT, budget.remaining);
+    const dt = Math.min(msg.dt, MAX_INPUT_DT, budget.remaining);
     budget.remaining -= dt;
 
     // Same function the client used to predict this move. If these ever
     // disagree, the local player rubber-bands.
     applyInput(player, { seq: msg.seq, dx: msg.dx, dy: msg.dy, dt }, this.grid);
 
-    if (typeof msg.seq === "number" && msg.seq > player.lastSeq) {
+    if (msg.seq > player.lastSeq) {
       player.lastSeq = msg.seq;
     }
   }
 
-  private handleStatus(client: Client, msg: SetStatusMessage): void {
+  private handleStatus(client: Client, status: PlayerStatus): void {
     const player = this.state.players.get(client.sessionId);
     if (!player) return;
-    const status = msg?.status === "focus" ? "focus" : "available";
     if (player.status === status) return;
     player.status = status;
     proximityLog.info({ sessionId: client.sessionId, status }, "status changed");
@@ -323,14 +416,10 @@ export class OfficeRoom extends Room<OfficeState> {
    * returns — they exist only in recipients' browser memory. That is what keeps
    * the "no conversation data is recorded" guarantee true for text as well.
    */
-  private handleChat(client: Client, msg: ChatOutMessage): void {
+  private handleChat(client: Client, { scope, text }: { scope: ChatScope; text: string }): void {
     const sender = this.state.players.get(client.sessionId);
-    if (!sender || typeof msg?.text !== "string") return;
+    if (!sender) return;
 
-    const text = msg.text.trim().slice(0, CHAT_MAX_LENGTH);
-    if (!text) return;
-
-    const scope: ChatScope = msg.scope === "room" ? "room" : "nearby";
     const payload: ChatInMessage = {
       id: `${client.sessionId}-${++this.chatSeq}`,
       from: client.sessionId,
@@ -354,18 +443,18 @@ export class OfficeRoom extends Room<OfficeState> {
 
   /** A new look from the avatar builder, shown to everyone at once. Invalid
    *  looks are ignored, so nobody can push something the client can't draw. */
-  private handleAvatar(client: Client, msg: SetAvatarMessage): void {
+  private handleAvatar(client: Client, look: string): void {
     const player = this.state.players.get(client.sessionId);
-    if (!player || !parseLook(msg?.look)) return;
-    player.avatar = msg.look;
+    if (!player || !parseLook(look)) return;
+    player.avatar = look;
   }
 
   /** Locks or unlocks the sender's current huddle. */
-  private handleLock(client: Client, msg: SetLockMessage): void {
+  private handleLock(client: Client, locked: boolean): void {
     const player = this.state.players.get(client.sessionId);
     if (!player) return;
 
-    if (msg?.locked) {
+    if (locked) {
       const cluster = this.proximity.clusterOf(client.sessionId);
       // Locking alone would just be Focus mode; require someone to lock WITH.
       if (cluster.size < 2) return;
@@ -435,7 +524,7 @@ export class OfficeRoom extends Room<OfficeState> {
 
   private handleMedia(client: Client, msg: SetMediaMessage): void {
     const player = this.state.players.get(client.sessionId);
-    if (!player || !msg) return;
+    if (!player) return;
     if (typeof msg.micOn === "boolean") player.micOn = msg.micOn;
     if (typeof msg.camOn === "boolean") player.camOn = msg.camOn;
     if (typeof msg.sharing === "boolean") player.sharing = msg.sharing;

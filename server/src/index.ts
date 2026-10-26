@@ -64,12 +64,12 @@ export async function startServer(): Promise<RunningServer> {
   const gameServer = new Server({
     transport: new WebSocketTransport({
       server: httpServer,
-      // Colyseus defaults maxPayload to 4KB, which is fine for movement input
-      // but far too small for WebRTC signaling: a single SDP offer is routinely
-      // 5-15KB once codecs and ICE parameters are listed. Exceeding it makes
-      // `ws` close the socket with 1009 the instant anyone tries to start a
-      // call, which looks like a reconnect loop rather than a signaling bug.
-      maxPayload: 256 * 1024,
+      // Colyseus defaults maxPayload to 4KB, far too small for WebRTC
+      // signaling: an SDP offer is 5-20KB once codecs and ICE parameters are
+      // listed (and `ws` closes the socket with 1009 when it's exceeded, which
+      // looks like a reconnect loop). 64KB fits any real SDP (validate.ts caps
+      // it at 48KB) while keeping each message small (audit SEC-7).
+      maxPayload: 64 * 1024,
     }),
     // TODO(scale): single process today. To shard rooms across processes, pass
     // `presence: new RedisPresence(...)` and `driver: new RedisDriver(...)` here

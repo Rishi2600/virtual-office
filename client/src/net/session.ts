@@ -28,8 +28,11 @@ const WS_URL: string =
 const RETRY_DELAYS_MS = [400, 900, 1800, 3000, 5000];
 const RETRY_EVERY_MS = 10_000;
 
-/** Must match CLOSE_SIGNED_OUT in server/src/rooms/OfficeRoom.ts. */
+/** Must match the close codes in server/src/rooms/OfficeRoom.ts. */
 const CLOSE_SIGNED_OUT = 4401;
+const CLOSE_REPLACED = 4409;
+
+const OFFICE_FULL = "The office is full right now. Try again in a little while.";
 
 /** Back to the sign-in page, which explains "You've been signed out". */
 function signedOut(): void {
@@ -106,7 +109,12 @@ export class Session {
 
     await this.refreshIceServers();
     const token = await fetchRealtimeToken();
-    const room = await this.client.joinOrCreate<OfficeState>("office", { token }, OfficeState);
+    // Disposed meanwhile (React's development double-mount does this): don't
+    // join, or this stale join would replace the live one (newest tab wins).
+    if (this.disposed) return;
+    const room = await this.client.joinOrCreate<OfficeState>("office", { token }, OfficeState).catch((err: Error) => {
+      throw new Error(err.message === "office_full" ? OFFICE_FULL : err.message, { cause: err });
+    });
     this.adopt(room);
     this.peers?.setLocalStream(useStore.getState().localStream);
   }
@@ -230,6 +238,12 @@ export class Session {
     // The server ended our sign-in session (signed out elsewhere, or removed):
     // retrying can't help, so go back to the sign-in page and say why.
     if (code === CLOSE_SIGNED_OUT) return signedOut();
+    // Opened somewhere else: that tab is the office now. This one offers "Use here".
+    if (code === CLOSE_REPLACED) {
+      void this.disconnect();
+      useStore.getState().set({ connection: "replaced", connectionDetail: "", peers: {} });
+      return;
+    }
 
     console.warn("[net] connection lost", code);
     // Tear the calls down straight away — a peer whose socket dropped is not

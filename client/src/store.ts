@@ -13,7 +13,8 @@ export type ChatLine =
 /** Dialogs the app can show (one at a time). */
 export type DialogName = "settings" | "avatar" | "finder" | null;
 
-export type ConnectionState = "idle" | "connecting" | "connected" | "reconnecting" | "failed";
+/** "replaced": this person opened Lamports somewhere else (newest tab wins). */
+export type ConnectionState = "idle" | "connecting" | "connected" | "reconnecting" | "failed" | "replaced";
 
 /** How the browser responded to our one and only getUserMedia prompt. */
 export type MediaState = "idle" | "prompting" | "granted" | "denied" | "unavailable";

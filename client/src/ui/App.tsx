@@ -5,7 +5,7 @@ import { Session } from "../net/session.js";
 import { Login, Unreachable } from "./Login.js";
 import { useLayout } from "./layout.js";
 import { Office } from "./stage/Office.js";
-import { LeftScreen, PhoneBlock } from "./stage/Screens.js";
+import { LeftScreen, PhoneBlock, ReplacedScreen } from "./stage/Screens.js";
 import { Toasts } from "./primitives/toasts.js";
 
 export function App() {
@@ -21,6 +21,9 @@ export function App() {
   // The server couldn't be reached at all (not "signed out": that's a 401).
   const [unreachable, setUnreachable] = useState(false);
   const [attempt, setAttempt] = useState(0);
+  // Bumped by "Use here" to join again after another tab took over.
+  const [joinKey, setJoinKey] = useState(0);
+  const replaced = useStore((s) => s.connection === "replaced");
 
   // Bootstrap: who am I, and what does the server want the client to know?
   useEffect(() => {
@@ -63,13 +66,23 @@ export function App() {
       setSession(null);
       void s.disconnect();
     };
-  }, [meId, config, left]);
+  }, [meId, config, left, joinKey]);
 
   if (layout === "phone") return <PhoneBlock />;
   if (!authChecked) return <div className="boot">Loading…</div>;
   if (unreachable) return <Unreachable onRetry={() => setAttempt((n) => n + 1)} />;
   if (!me) return <Login />;
   if (left) return <LeftScreen onRejoin={() => setLeft(false)} />;
+  if (replaced) {
+    return (
+      <ReplacedScreen
+        onUseHere={() => {
+          useStore.getState().set({ connection: "idle" });
+          setJoinKey((k) => k + 1);
+        }}
+      />
+    );
+  }
 
   return (
     <>

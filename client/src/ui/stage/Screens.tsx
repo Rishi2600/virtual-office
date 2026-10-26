@@ -1,4 +1,4 @@
-import { DoorOpen, MonitorSmartphone } from "lucide-react";
+import { DoorOpen, MonitorSmartphone, MonitorUp } from "lucide-react";
 import { logout } from "../../net/api.js";
 import { Button } from "../primitives/primitives.js";
 import "./stage.css";
@@ -11,6 +11,24 @@ export function PhoneBlock() {
         <MonitorSmartphone size={40} color="var(--accent)" />
         <h1>Lamports needs a bigger screen</h1>
         <p>Open it on a laptop, desktop or tablet. On a tablet, turning it sideways helps.</p>
+      </div>
+    </div>
+  );
+}
+
+/** Another tab or computer of yours joined the office (newest tab wins). */
+export function ReplacedScreen({ onUseHere }: { onUseHere: () => void }) {
+  return (
+    <div className="screen" data-testid="replaced-screen">
+      <div className="screen-card">
+        <MonitorUp size={40} color="var(--accent)" />
+        <h1>You opened Lamports somewhere else</h1>
+        <p>You can only be in the office once. Use it here instead, and the other tab steps out.</p>
+        <div className="screen-actions">
+          <Button variant="primary" onClick={onUseHere}>
+            Use here
+          </Button>
+        </div>
       </div>
     </div>
   );

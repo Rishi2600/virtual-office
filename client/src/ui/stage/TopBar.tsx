@@ -11,6 +11,7 @@ const CONN: Record<ConnectionState, { dot: string; text: string }> = {
   connected: { dot: "ok", text: "Connected" },
   reconnecting: { dot: "warn", text: "Reconnecting…" },
   failed: { dot: "bad", text: "Disconnected" },
+  replaced: { dot: "off", text: "Open elsewhere" },
 };
 
 export const isMac = /Mac|iPhone|iPad/.test(navigator.platform);

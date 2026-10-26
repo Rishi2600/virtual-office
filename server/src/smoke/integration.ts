@@ -300,6 +300,23 @@ check(
 );
 check("the connection survived sending it", alice.room.connection.isOpen);
 
+// Only a clean SDP is relayed: stray fields are stripped, an oversized one dropped (SEC-7).
+bob.signals.length = 0;
+alice.room.send(C2S.Signal, {
+  to: bob.room.sessionId,
+  payload: { kind: "description", description: { type: "answer", sdp: "v=0\r\n", note: "<script>" } },
+  extra: "x",
+});
+await waitFor("clean signal relayed", () => bob.signals.length > 0);
+check("relayed signals carry only the SDP, never extra fields", JSON.stringify(bob.signals[0]?.payload) === '{"kind":"description","description":{"type":"answer","sdp":"v=0\\r\\n"}}', JSON.stringify(bob.signals[0]?.payload));
+bob.signals.length = 0;
+alice.room.send(C2S.Signal, {
+  to: bob.room.sessionId,
+  payload: { kind: "description", description: { type: "offer", sdp: "x".repeat(50 * 1024) } },
+});
+await sleep(300);
+check("an oversized SDP isn't relayed, and doesn't drop the connection", bob.signals.length === 0 && alice.room.connection.isOpen);
+
 // -- 5. hysteresis ----------------------------------------------------------
 console.log("\nhysteresis");
 alice.exited.length = 0; bob.exited.length = 0;
@@ -523,6 +540,69 @@ console.log("\nsessions");
   check("a removed person can't sign in again", (await cookieFor("Finn")).status === 403);
   await unblockUser("finn@dev.local");
   check("…until they're let back in", (await cookieFor("Finn")).status === 200);
+}
+
+// -- 9d. what clients send ----------------------------------------------------
+console.log("\nclient messages");
+{
+  /** Joins a fresh connection and records how it was closed. */
+  const connect = async (name: string) => {
+    const peer = await joinAs(name);
+    let closed: number | null = null;
+    peer.room.onLeave((code) => (closed = code));
+    peer.room.onError(() => {});
+    return { peer, closed: () => closed };
+  };
+
+  // A NaN dt used to turn your position into NaN for good (SEC-8).
+  const before = { x: self(alice).x, y: self(alice).y };
+  alice.room.send(C2S.Input, { seq: seq++, dx: 1, dy: 0, dt: NaN });
+  alice.room.send(C2S.Input, { seq: seq++, dx: 1, dy: 0, dt: Infinity });
+  alice.room.send("nonsense", { hello: 1 });
+  await sleep(300);
+  check("NaN/Infinity input is ignored; position stays valid", Number.isFinite(self(alice).x) && self(alice).x === before.x && self(alice).y === before.y, `${self(alice).x},${self(alice).y}`);
+  check("an unknown message type doesn't break the connection", alice.room.connection.isOpen);
+
+  // Chat flood: everyone in the office would get it (SEC-7).
+  clearEvents(alice, bob);
+  for (let i = 0; i < 40; i++) alice.room.send(C2S.Chat, { scope: "room", text: `spam ${i}` });
+  await sleep(500);
+  check("a burst of 40 chat messages reaches others as at most ~8", bob.chats.length >= 8 && bob.chats.length <= 9, `${bob.chats.length}`);
+
+  // A connection that keeps flooding is closed and removed.
+  const flood = await connect("Flo");
+  for (let i = 0; i < 1500; i++) flood.peer.room.send(C2S.Input, { seq: i, dx: 1, dy: 0, dt: 0.01 });
+  const cut = await waitFor("flooding connection closed", () => flood.closed() === 4429, 5000);
+  check("a connection flooding the room is disconnected (4429)", cut, `closed=${flood.closed()}`);
+  check("…and removed at once", await waitFor("Flo removed", () => !alice.room.state.players.has(flood.peer.room.sessionId), 1000));
+
+  // Newest tab wins (SEC-9): the second connection takes over in place.
+  const first = await connect("Hana");
+  await holdDirection(first.peer, 1, 0, 300);
+  await sleep(150);
+  const where = { x: self(first.peer).x, y: self(first.peer).y };
+  const second = await connect("Hana");
+  check("the older connection of the same person is told it was replaced (4409)", await waitFor("first Hana replaced", () => first.closed() === 4409, 3000), `closed=${first.closed()}`);
+  const hanas = () => [...alice.room.state.players.values()].filter((p) => p.name === "Hana").length;
+  check("…so there's only one of them in the office", await waitFor("one Hana", () => hanas() === 1, 1000), `${hanas()}`);
+  check("…and the new one carries on from the same spot", Math.hypot(self(second.peer).x - where.x, self(second.peer).y - where.y) < 1);
+  await second.peer.room.leave(true);
+
+  // One office, never a second one when it's full (OPS-8).
+  // Keep adding people until one is refused (seats still being released or
+  // reserved count too, so "full" can come a moment before 40 are visible).
+  const extra: Peer[] = [];
+  let refusal = "";
+  for (let i = 0; i < 45 && !refusal; i++) {
+    await joinAs(`Guest${i}`).then(
+      (p) => void extra.push(p),
+      (e: Error) => void (refusal = e.message),
+    );
+  }
+  const inside = alice.room.state.players.size;
+  check("when the office is full, the next person is told so (no second office)", refusal === "office_full" && inside >= 36 && inside <= 40, `${refusal} with ${inside} inside`);
+  for (const p of extra) await p.room.leave(true);
+  await waitFor("guests gone", () => alice.room.state.players.size === 2, 5000);
 }
 
 // -- 10. reconnect ----------------------------------------------------------
