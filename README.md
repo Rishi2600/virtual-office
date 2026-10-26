@@ -192,6 +192,11 @@ It lists every problem at once, so you fix them in one pass.
 either or both — at least one is required in production, or the server refuses to start. Secrets go
 in `.env`, which is gitignored; never commit them.
 
+Every sign-in uses OAuth `state` and PKCE, kept in a short-lived signed cookie in your browser, so a
+sign-in link or callback crafted by someone else can't log you into their account, and an
+intercepted authorization code is useless on its own. A failed or tampered sign-in brings you back to
+the sign-in page with "Sign-in didn't finish".
+
 **Microsoft** — Azure Portal → **Microsoft Entra ID → App registrations → New registration**.
 Platform **Web**, with a redirect URI matching `MICROSOFT_CALLBACK_URL` exactly. Then
 **Certificates & secrets → New client secret** — copy the secret's **Value** (not its Secret ID,

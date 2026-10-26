@@ -7,6 +7,7 @@ import { authLog } from "../log.js";
 import type { Repository, UserRecord } from "../db/index.js";
 import { signRealtimeToken, signSessionToken, verifyToken } from "./jwt.js";
 import { iceServersFor } from "./turn.js";
+import { cookieStateStore } from "./oauthState.js";
 import { parseLook } from "@vo/shared";
 
 const COOKIE = "vo_session";
@@ -89,7 +90,12 @@ async function upsertFromProvider(
   }
 }
 
-export function createAuthRouter(repo: Repository): Router {
+export interface AuthRouterOptions {
+  /** Tests only: point the GitHub strategy at a fake provider. */
+  githubEndpoints?: { authorizationURL: string; tokenURL: string; userProfileURL: string; userEmailURL: string };
+}
+
+export function createAuthRouter(repo: Repository, options: AuthRouterOptions = {}): Router {
   const router = Router();
 
   /** Registers /auth/<name> and /auth/<name>/callback for a passport strategy. */
@@ -134,6 +140,10 @@ export function createAuthRouter(repo: Repository): Router {
       // userPrincipalName IS the work address. Without this, sign-in fails
       // for those users with a confusing "no email" error.
       addUPNAsEmail: true,
+      // state + PKCE (S256) in a signed cookie (oauthState.ts): no login CSRF.
+      // A custom store turns state handling on by itself.
+      pkce: true,
+      store: cookieStateStore("microsoft"),
     };
 
     passport.use(
@@ -170,6 +180,12 @@ export function createAuthRouter(repo: Repository): Router {
           // Without this scope GitHub returns no email at all for accounts that
           // keep it private, and sign-in would fail for them.
           scope: ["user:email"],
+          // state + PKCE (S256) in a signed cookie (oauthState.ts): no login CSRF.
+          // A custom store turns state handling on by itself.
+          pkce: true,
+          store: cookieStateStore("github"),
+          // Only for the OAuth test (smoke/oauth.ts), which runs a fake GitHub.
+          ...options.githubEndpoints,
         },
         (_accessToken: string, _refreshToken: string, profile: OAuthProfile, done: DoneFn) => {
           void upsertFromProvider(

@@ -9,7 +9,7 @@
     "start": "node dist/main.js",
     "smoke": "tsx src/smoke/colyseus-compat.ts",
     "test:postgres": "tsx src/smoke/postgres.ts",
-    "test": "tsx src/smoke/integration.ts && tsx src/smoke/config.ts && tsx src/smoke/shutdown.ts && tsx src/smoke/restart.ts"
+    "test": "tsx src/smoke/integration.ts && tsx src/smoke/oauth.ts && tsx src/smoke/config.ts && tsx src/smoke/shutdown.ts && tsx src/smoke/restart.ts"
   },
   "dependencies": {
     "@colyseus/core": "^0.16.26",
