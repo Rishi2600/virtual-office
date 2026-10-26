@@ -68,6 +68,23 @@ check("spots save in a batch and read back exactly (migration 3)", spot?.x === 4
 await repo.saveSpots("office", [{ userId: user.id, x: 10, y: 20 }]);
 check("saving again overwrites: one row per person, no history", (await q(`SELECT 1 FROM user_positions WHERE user_id = '${user.id}'`)).length === 1 && (await repo.getSpot(user.id, "office"))?.x === 10);
 check("spots are per space", (await repo.getSpot(user.id, "elsewhere")) === null);
+
+// Identity rules (Repository.upsertUser, audit SEC-4): the GitHub id is the anchor.
+const gh1 = await repo.upsertUser({ provider: "github", providerId: "g1", email: "kim@example.com", name: "Kim" });
+const gh1Again = await repo.upsertUser({ provider: "github", providerId: "g1", email: "kim.new@example.com", name: "Kim" });
+check("a GitHub account keeps its user when its email changes", gh1Again.id === gh1.id && gh1Again.email === "kim.new@example.com");
+const conflict = await repo
+  .upsertUser({ provider: "github", providerId: "g2", email: "kim.new@example.com", name: "Eve" })
+  .then(() => "accepted", (e: Error) => e.name);
+check("another GitHub account with that email is refused, not merged", conflict === "IdentityConflictError", conflict);
+await q(`INSERT INTO users (provider, provider_id, email, name) VALUES ('microsoft', 'm1', 'lee@example.com', 'Lee')`);
+const legacy = (await q<{ id: string }>(`SELECT id FROM users WHERE email = 'lee@example.com'`))[0]!.id;
+const adopted = await repo.upsertUser({ provider: "github", providerId: "g3", email: "lee@example.com", name: "Lee" });
+check("a legacy account from a removed provider is adopted by its verified email", adopted.id === legacy && adopted.provider === "github");
+const stolen = await repo
+  .upsertUser({ provider: "github", providerId: "g3", email: "kim.new@example.com", name: "Lee" })
+  .then(() => "accepted", (e: Error) => e.name);
+check("an email change onto someone else's address is refused", stolen === "IdentityConflictError", stolen);
 check("default space is seeded", (await repo.listSpaces()).some((s) => s.slug === "office"));
 await repo.ping();
 check("ping() answers", true);

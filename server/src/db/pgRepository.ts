@@ -8,6 +8,7 @@ import {
   type SpotRecord,
   type UpsertUserInput,
   type UserRecord,
+  IdentityConflictError,
 } from "./types.js";
 
 /** Arbitrary but fixed key for pg_advisory_lock: one migrator at a time, even
@@ -75,27 +76,60 @@ export class PgRepository implements Repository {
   }
 
   async upsertUser(input: UpsertUserInput): Promise<UserRecord> {
-    // Email is the identity anchor: one person signing in via Microsoft and via
-    // GitHub on the same address resolves to a single account.
-    const { rows } = await this.pool.query<Row>(
-      `INSERT INTO users (provider, provider_id, email, name, picture)
-       VALUES ($1,$2,$3,$4,$5)
-       ON CONFLICT (email) DO UPDATE
-         SET name         = EXCLUDED.name,
-             picture      = EXCLUDED.picture,
-             provider     = EXCLUDED.provider,
-             provider_id  = COALESCE(EXCLUDED.provider_id, users.provider_id),
-             last_seen_at = now()
-       RETURNING *`,
-      [
-        input.provider ?? "dev",
-        input.providerId ?? null,
-        input.email.toLowerCase(),
-        input.name,
-        input.picture ?? "",
-      ],
-    );
-    return toUser(rows[0]!);
+    // Rules in types.ts (Repository.upsertUser). One transaction, so two
+    // sign-ins racing can't both create the account.
+    const provider = input.provider ?? "dev";
+    const email = input.email.toLowerCase();
+    const picture = input.picture ?? "";
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      let row: Row | undefined;
+      if (input.providerId) {
+        row = (
+          await client.query<Row>(`SELECT * FROM users WHERE provider = $1 AND provider_id = $2 FOR UPDATE`, [
+            provider,
+            input.providerId,
+          ])
+        ).rows[0];
+        if (!row) {
+          const byEmail = (await client.query<Row>(`SELECT * FROM users WHERE email = $1 FOR UPDATE`, [email])).rows[0];
+          if (byEmail?.provider === provider && byEmail.provider_id) {
+            throw new IdentityConflictError(`this email already belongs to another ${provider} account here`);
+          }
+          row = byEmail;
+        }
+      } else {
+        row = (await client.query<Row>(`SELECT * FROM users WHERE email = $1 FOR UPDATE`, [email])).rows[0];
+      }
+
+      const result = row
+        ? await client.query<Row>(
+            `UPDATE users
+                SET email = $2, name = $3, picture = $4,
+                    provider = CASE WHEN $5::text IS NULL THEN provider ELSE $6 END,
+                    provider_id = COALESCE($5, provider_id),
+                    last_seen_at = now()
+              WHERE id = $1
+          RETURNING *`,
+            [row.id, email, input.name, picture, input.providerId ?? null, provider],
+          )
+        : await client.query<Row>(
+            `INSERT INTO users (provider, provider_id, email, name, picture) VALUES ($1,$2,$3,$4,$5) RETURNING *`,
+            [provider, input.providerId ?? null, email, input.name, picture],
+          );
+      await client.query("COMMIT");
+      return toUser(result.rows[0]!);
+    } catch (err) {
+      await client.query("ROLLBACK").catch(() => {});
+      // The new email is already another account's (unique index).
+      if ((err as { code?: string }).code === "23505") {
+        throw new IdentityConflictError("this email already belongs to another account here", { cause: err });
+      }
+      throw err;
+    } finally {
+      client.release();
+    }
   }
 
   async getUser(id: string): Promise<UserRecord | null> {

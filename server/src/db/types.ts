@@ -1,7 +1,7 @@
 export interface UserRecord {
   id: string;
-  /** Which provider this account most recently signed in with: "microsoft",
-   *  "github", or "dev". Email remains the identity anchor — see upsertUser. */
+  /** How this account signs in: "github", or "dev" (local only). Older rows
+   *  may say "microsoft", which is no longer offered. */
   provider: string;
   /** The provider's own id for this account, if any. */
   providerId: string | null;
@@ -39,8 +39,29 @@ export interface UpsertUserInput {
 
 /** The only persistence surface the app uses. Two implementations back it:
  *  PgRepository (production) and FileRepository (zero-setup local dev). */
+/** A sign-in that would take over, or collide with, another account. */
+export class IdentityConflictError extends Error {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = "IdentityConflictError";
+  }
+}
+
 export interface Repository {
   init(): Promise<void>;
+  /**
+   * Finds or creates the account for a sign-in, and refreshes its profile.
+   *
+   * With a provider id (GitHub): the account is the one with that
+   * (provider, providerId); its email follows the provider's verified email.
+   * If there's none yet, an existing account with the same (verified) email
+   * is adopted only if no other identity of this provider owns it, i.e. a
+   * legacy row without a provider id or from a provider that's gone.
+   * Anything else throws IdentityConflictError: an email must never be a way
+   * into someone else's account (audit SEC-4).
+   *
+   * Without a provider id (dev sign-in): matched by email.
+   */
   upsertUser(input: UpsertUserInput): Promise<UserRecord>;
   getUser(id: string): Promise<UserRecord | null>;
   touchUser(id: string): Promise<void>;

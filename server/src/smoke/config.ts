@@ -35,11 +35,9 @@ const BLANK = {
   PORT: "",
   SESSION_TTL_SEC: "",
   REALTIME_TTL_SEC: "",
-  MICROSOFT_CLIENT_ID: "",
-  MICROSOFT_CLIENT_SECRET: "",
-  MICROSOFT_TENANT_ID: "",
   GITHUB_CLIENT_ID: "",
   GITHUB_CLIENT_SECRET: "",
+  ALLOWED_EMAIL_DOMAIN: "",
   DATABASE_URL: "",
   LOG_LEVEL: "info",
   STUN_URLS: "",
@@ -130,7 +128,7 @@ console.log("\nstartup guards\n");
 
 let o = await boot({});
 check("NODE_ENV unset is treated as production and refused without a secret", !o.started && o.output.includes("JWT_SECRET must be set"));
-check("…and without a sign-in provider", o.output.includes("configure at least one sign-in provider"));
+check("…and without GitHub sign-in", o.output.includes("configure GitHub sign-in"));
 check("…and says it is treating unset NODE_ENV as production", o.output.includes("NODE_ENV=unset"));
 
 o = await boot({ JWT_SECRET: GOOD_SECRET, ...GITHUB, DEV_AUTH: "true" });
@@ -145,19 +143,11 @@ check("the public dev JWT_SECRET is refused", !o.started && o.output.includes("J
 o = await boot({ NODE_ENV: "staging", JWT_SECRET: GOOD_SECRET, ...GITHUB, PORT: "abc" });
 check("a non-numeric PORT is refused instead of silently defaulting", !o.started && o.output.includes("PORT must be a positive whole number") && o.output.includes("abc"));
 
-o = await boot({
-  NODE_ENV: "production",
-  JWT_SECRET: GOOD_SECRET,
-  MICROSOFT_CLIENT_ID: "id",
-  MICROSOFT_CLIENT_SECRET: "secret",
-  MICROSOFT_TENANT_ID: "common",
-});
-check('MICROSOFT_TENANT_ID=common is refused in production', !o.started && o.output.includes("must be your tenant GUID"));
-
 o = await boot({ JWT_SECRET: GOOD_SECRET, ...GITHUB, PORT: "2593" });
 check("a safe config starts with NODE_ENV unset", o.started, o.output.slice(-400));
 check("…with dev sign-in reported off", o.config?.devAuthEnabled === false);
 check("…and the dev sign-in route absent", o.devRouteStatus === 404, `status ${o.devRouteStatus}`);
+check("…and it warns that sign-in is open to any GitHub account", o.output.includes("open to ANYONE with a GitHub account"));
 
 o = await boot({ NODE_ENV: "development", PORT: "2594" });
 check("development starts with no config at all", o.started, o.output.slice(-400));

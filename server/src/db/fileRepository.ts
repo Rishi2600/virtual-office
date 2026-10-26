@@ -8,6 +8,7 @@ import {
   type SpotRecord,
   type UpsertUserInput,
   type UserRecord,
+  IdentityConflictError,
 } from "./types.js";
 
 interface FileShape {
@@ -60,19 +61,30 @@ export class FileRepository implements Repository {
     const now = new Date().toISOString();
     const email = input.email.toLowerCase();
     const provider = input.provider ?? "dev";
-    // Email is the identity anchor, so the same person arriving via Microsoft
-    // and via GitHub on one address is one account, not two.
-    let user = this.data.users.find(
-      (u) =>
-        u.email === email ||
-        (!!input.providerId && u.provider === provider && u.providerId === input.providerId),
-    );
+    // Rules in types.ts (Repository.upsertUser): the provider identity is the
+    // anchor; an email never leads into another identity's account.
+    const byEmail = this.data.users.find((u) => u.email === email);
+    let user = input.providerId
+      ? this.data.users.find((u) => u.provider === provider && u.providerId === input.providerId)
+      : byEmail;
+    if (input.providerId && !user) {
+      if (byEmail?.provider === provider && byEmail.providerId) {
+        throw new IdentityConflictError(`this email already belongs to another ${provider} account here`);
+      }
+      user = byEmail;
+    }
+    if (user && byEmail && byEmail !== user) {
+      throw new IdentityConflictError("this email already belongs to another account here");
+    }
 
     if (user) {
+      user.email = email;
       user.name = input.name || user.name;
       user.picture = input.picture ?? user.picture;
-      user.provider = provider;
-      if (input.providerId) user.providerId = input.providerId;
+      if (input.providerId) {
+        user.provider = provider;
+        user.providerId = input.providerId;
+      }
       user.lastSeenAt = now;
     } else {
       // Dev users get a deterministic id derived from their email so that

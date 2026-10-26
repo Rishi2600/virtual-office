@@ -179,68 +179,45 @@ Everything has a working dev default. Copy `.env.example` to `.env` to change an
 unset, runs as production, and the server **refuses to start** unless the config is safe:
 
 - `JWT_SECRET` set, at least 32 characters (`openssl rand -base64 48`)
-- at least one sign-in provider configured
-- `MICROSOFT_TENANT_ID` not `common`
+- GitHub sign-in configured (`GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`)
 - `DEV_AUTH` not set to `true` (dev sign-in can't be enabled outside development)
 - numeric settings (`PORT`, `SESSION_TTL_SEC`, `REALTIME_TTL_SEC`) actually numbers
 
 It lists every problem at once, so you fix them in one pass.
 
-### Sign-in providers
+### Sign-in (GitHub)
 
-**Microsoft (Outlook / Entra ID)** is the primary provider; **GitHub** is the secondary. Configure
-either or both — at least one is required in production, or the server refuses to start. Secrets go
-in `.env`, which is gitignored; never commit them.
-
-Every sign-in uses OAuth `state` and PKCE, kept in a short-lived signed cookie in your browser, so a
-sign-in link or callback crafted by someone else can't log you into their account, and an
-intercepted authorization code is useless on its own. A failed or tampered sign-in brings you back to
-the sign-in page with "Sign-in didn't finish".
-
-**Microsoft** — Azure Portal → **Microsoft Entra ID → App registrations → New registration**.
-Platform **Web**, with a redirect URI matching `MICROSOFT_CALLBACK_URL` exactly. Then
-**Certificates & secrets → New client secret** — copy the secret's **Value** (not its Secret ID,
-which is the usual mix-up). Grant the delegated Graph permission `User.Read`.
-
-- local: `http://localhost:5173/auth/microsoft/callback`
-- production: `https://your-domain/auth/microsoft/callback`
-
-**GitHub** — **Settings → Developer settings → OAuth Apps → New OAuth App**. The *Authorization
-callback URL* must match exactly:
+**GitHub is the only way to sign in**, in development and production. Create an OAuth app under
+**Settings → Developer settings → OAuth Apps → New OAuth App**. The *Authorization callback URL*
+must match `GITHUB_CALLBACK_URL` exactly:
 
 - local: `http://localhost:5173/auth/github/callback`
 - production: `https://your-domain/auth/github/callback`
 
 ```ini
-MICROSOFT_CLIENT_ID=...
-MICROSOFT_CLIENT_SECRET=...
-MICROSOFT_CALLBACK_URL=http://localhost:5173/auth/microsoft/callback
-MICROSOFT_TENANT_ID=common          # your tenant GUID in production
-
 GITHUB_CLIENT_ID=...
 GITHUB_CLIENT_SECRET=...
 GITHUB_CALLBACK_URL=http://localhost:5173/auth/github/callback
 
-ALLOWED_EMAIL_DOMAIN=               # optional; leave blank while testing
+ALLOWED_EMAIL_DOMAIN=               # optional, see below
 ```
 
-> `.env` is read once at startup. **Restart `npm run dev` after editing it**, or the buttons won't
-> appear and it'll look broken.
+Secrets go in `.env`, which is gitignored; never commit them. `.env` is read once at startup:
+**restart `npm run dev` after editing it**, or the button won't appear and it'll look broken.
 
-**`MICROSOFT_TENANT_ID` is the real access control.** Set it to your Entra directory (tenant) GUID
-and Microsoft simply won't issue a token to anyone outside your organisation — a genuine boundary,
-not a string match after the fact. `common` accepts any Microsoft account including personal ones,
-so it's for testing only; the server refuses to start in production while it's set to `common`.
+**Who can get in.** For now, **anyone with a GitHub account** can sign in (owner decision while the
+product is being developed). In production the server logs a warning about this at every start.
+To restrict it, set `ALLOWED_EMAIL_DOMAIN=yourcompany.com`: only people with a **verified** GitHub
+email in that domain get in. (GitHub organisation membership is a possible later gate.)
 
-Two things worth knowing:
+**Accounts are your GitHub account**, not your email address: change your email on GitHub and you
+keep your Lamports account. Only email addresses GitHub has **verified** are accepted, and an
+address can't be used to get into an account that belongs to a different GitHub account.
 
-- **Email is the identity anchor.** The same person signing in with Microsoft and with GitHub on
-  one address resolves to a single account. If their GitHub email differs from their work address,
-  they'll get two accounts — linking identities is a follow-up.
-- **`ALLOWED_EMAIL_DOMAIN` applies to GitHub too**, and GitHub accounts often use a personal email,
-  so setting it will lock those people out. Prefer the tenant restriction and leave this blank
-  unless you want belt-and-braces. Gating GitHub by *organisation membership* is the cleaner
-  equivalent and a natural follow-up.
+Every sign-in uses OAuth `state` and PKCE, kept in a short-lived signed cookie in your browser, so a
+sign-in link or callback crafted by someone else can't log you into their account, and an
+intercepted authorization code is useless on its own. A failed or tampered sign-in brings you back to
+the sign-in page with "Sign-in didn't finish".
 
 ### Database
 
@@ -355,7 +332,7 @@ server/                     Node + Express + Colyseus
   rooms/OfficeRoom.ts       authoritative state, 20Hz tick
   rooms/proximity.ts        distance + hysteresis, enter/exit events
   rooms/signaling.ts        SDP/ICE relay (no media)
-  auth/                     Microsoft + GitHub OAuth -> JWT -> WS handshake
+  auth/                     GitHub OAuth (state + PKCE) -> JWT -> WS handshake
   db/                       Repository: Postgres or JSON file
 shared/                     imported by BOTH sides
   movement.ts               the one simulation step

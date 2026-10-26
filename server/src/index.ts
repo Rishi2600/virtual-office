@@ -5,7 +5,7 @@ import express from "express";
 import cookieParser from "cookie-parser";
 import { Server } from "@colyseus/core";
 import { WebSocketTransport } from "@colyseus/ws-transport";
-import { assertSafeConfig, env, githubConfigured, microsoftConfigured } from "./env.js";
+import { assertSafeConfig, env, githubConfigured } from "./env.js";
 import { log } from "./log.js";
 import { createRepository } from "./db/index.js";
 import { createAuthRouter } from "./auth/routes.js";
@@ -88,7 +88,6 @@ export async function startServer(): Promise<RunningServer> {
     {
       port: env.port,
       env: env.nodeEnv,
-      microsoftAuth: microsoftConfigured(),
       githubAuth: githubConfigured(),
       devAuth: env.devAuth,
       stun: env.stunUrls,
@@ -96,6 +95,13 @@ export async function startServer(): Promise<RunningServer> {
     },
     "virtual office server listening",
   );
+  if (!env.isDev && !env.allowedEmailDomain) {
+    // Owner decision (2026-10-26): open while the product is being developed.
+    // Said loudly so it's never forgotten once real people use it.
+    log.warn(
+      "sign-in is open to ANYONE with a GitHub account; set ALLOWED_EMAIL_DOMAIN to restrict it to your organisation",
+    );
+  }
 
   // Idempotent: a second signal (or a test calling close()) joins the same shutdown.
   let closing: Promise<void> | null = null;

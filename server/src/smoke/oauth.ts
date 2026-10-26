@@ -6,7 +6,12 @@
  *   - a wrong `state`, or a tampered cookie, is refused;
  *   - the genuine flow signs in, and the token request carries the PKCE
  *     verifier that matches the challenge sent at the start;
- *   - the state cookie is single-use.
+ *   - the state cookie is single-use;
+ * and that accounts can't be taken over through email addresses (SEC-4):
+ *   - only verified GitHub emails are accepted;
+ *   - the account is the GitHub account id, so another GitHub account
+ *     claiming the same email is refused, and changing your email keeps
+ *     your account.
  *
  * Run: npm test.
  */
@@ -20,7 +25,6 @@ process.env.NODE_ENV = "development";
 process.env.LOG_LEVEL = "error";
 process.env.GITHUB_CLIENT_ID = "test-client";
 process.env.GITHUB_CLIENT_SECRET = "test-secret";
-process.env.MICROSOFT_CLIENT_ID = "";
 process.env.DATABASE_URL = "";
 const DATA_FILE = path.join(os.tmpdir(), `lamports-oauth-${process.pid}.json`);
 process.env.DATA_FILE = DATA_FILE;
@@ -51,8 +55,10 @@ gh.post("/token", (req, res) => {
   if (req.body.code !== "good-code" || !verifierMatched) return res.status(400).json({ error: "bad_verification_code" });
   res.json({ access_token: "gho_test", token_type: "bearer", scope: "user:email" });
 });
-gh.get("/user", (_req, res) => res.json({ id: 4242, login: "octo", name: "Octo Cat", avatar_url: "" }));
-gh.get("/user/emails", (_req, res) => res.json([{ email: "octo@example.com", primary: true, verified: true }]));
+/** Which GitHub account the fake provider is signing in right now. */
+let account = { id: 4242, login: "octo", emails: [{ email: "octo@example.com", primary: true, verified: true }] };
+gh.get("/user", (_req, res) => res.json({ id: account.id, login: account.login, name: account.login, avatar_url: "" }));
+gh.get("/user/emails", (_req, res) => res.json(account.emails));
 const ghServer = gh.listen(0);
 const GH = `http://localhost:${(ghServer.address() as AddressInfo).port}`;
 
@@ -112,6 +118,42 @@ check("the token request carried the matching PKCE verifier", tokenCalls === 1 &
 check("the state cookie is cleared after use", ok.headers.getSetCookie().some((c) => c.startsWith("vo_oauth=;")));
 const me = (await fetch(`${BASE}/api/me`, { headers: { cookie: session ?? "" } }).then((r) => r.json())) as { email?: string };
 check("…as the GitHub account", me.email === "octo@example.com", JSON.stringify(me));
+
+// ---------------------------------------------------- identity (SEC-4)
+/** A full, genuine sign-in for whatever `account` is; returns the session cookie or null. */
+async function signInAs(next: typeof account): Promise<string | null> {
+  account = next;
+  const s = await fetch(`${BASE}/auth/github`, { redirect: "manual" });
+  const u = new URL(s.headers.get("location") ?? "http://x/");
+  lastChallenge = u.searchParams.get("code_challenge") ?? "";
+  const r = await callback(`code=good-code&state=${u.searchParams.get("state")}`, cookieFrom(s, "vo_oauth"));
+  return r.headers.get("location") === "/" ? (cookieFrom(r, "vo_session") ?? null) : null;
+}
+const meWith = async (cookie: string | null) =>
+  (await fetch(`${BASE}/api/me`, { headers: { cookie: cookie ?? "" } }).then((r) => r.json())) as { id?: string; email?: string };
+
+console.log("\nidentity\n");
+const octoId = (await meWith(session ?? null)).id;
+
+const unverified = await signInAs({ id: 5555, login: "mallory", emails: [{ email: "mallory@example.com", primary: true, verified: false }] });
+check("an account with only unverified emails is refused", unverified === null);
+
+const pick = await signInAs({
+  id: 7777,
+  login: "pat",
+  emails: [
+    { email: "pat-unverified@example.com", primary: true, verified: false },
+    { email: "pat@example.com", primary: false, verified: true },
+  ],
+});
+check("an unverified primary email is skipped for a verified one", (await meWith(pick)).email === "pat@example.com");
+
+const takeover = await signInAs({ id: 6666, login: "eve", emails: [{ email: "octo@example.com", primary: true, verified: true }] });
+check("another GitHub account with the same email can't get into that account", takeover === null);
+
+const moved = await signInAs({ id: 4242, login: "octo", emails: [{ email: "octo-new@example.com", primary: true, verified: true }] });
+const after = await meWith(moved);
+check("changing your email on GitHub keeps your account", after.id === octoId && after.email === "octo-new@example.com", JSON.stringify(after));
 
 appServer.close();
 ghServer.close();

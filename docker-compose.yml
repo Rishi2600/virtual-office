@@ -35,13 +35,7 @@ services:
       PORT: 2567
       DATABASE_URL: postgres://vo:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/virtual_office
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
-      # Configure Microsoft, GitHub, or both. The server refuses to start in
-      # production unless at least one provider is present.
-      MICROSOFT_CLIENT_ID: ${MICROSOFT_CLIENT_ID:-}
-      MICROSOFT_CLIENT_SECRET: ${MICROSOFT_CLIENT_SECRET:-}
-      MICROSOFT_CALLBACK_URL: ${MICROSOFT_CALLBACK_URL:-http://localhost:2567/auth/microsoft/callback}
-      # Must be your tenant GUID in production; "common" is refused there.
-      MICROSOFT_TENANT_ID: ${MICROSOFT_TENANT_ID:-common}
+      # GitHub is the only sign-in; the server refuses to start without it.
       GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
       GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
       GITHUB_CALLBACK_URL: ${GITHUB_CALLBACK_URL:-http://localhost:2567/auth/github/callback}

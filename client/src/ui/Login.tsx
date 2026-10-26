@@ -57,9 +57,7 @@ export function Login() {
     }
   }
 
-  const providers = !!config && (config.microsoftEnabled || config.githubEnabled);
-  const both = !!config?.microsoftEnabled && !!config.githubEnabled;
-  const shown = error || (authFailed ? `Sign-in didn't finish. Please try again${both ? ", or use the other provider" : ""}.` : "");
+  const shown = error || (authFailed ? "Sign-in didn't finish. Please try again." : "");
 
   return (
     <div className="signin">
@@ -89,22 +87,17 @@ export function Login() {
           </ul>
 
           <div className="signin-stack">
-            {config?.microsoftEnabled && (
-              <a className="btn btn-primary btn-lg" href="/auth/microsoft">
-                Continue with Microsoft
-              </a>
-            )}
             {config?.githubEnabled && (
-              <a className={`btn btn-lg ${config.microsoftEnabled ? "btn-default" : "btn-primary"}`} href="/auth/github">
+              <a className="btn btn-primary btn-lg" href="/auth/github">
                 Continue with GitHub
               </a>
             )}
           </div>
 
-          {config && !providers && !config.devAuthEnabled && (
+          {config && !config.githubEnabled && !config.devAuthEnabled && (
             <p className="signin-fine">
-              No sign-in provider is configured yet. Add <code>MICROSOFT_CLIENT_ID</code>/<code>MICROSOFT_CLIENT_SECRET</code> or{" "}
-              <code>GITHUB_CLIENT_ID</code>/<code>GITHUB_CLIENT_SECRET</code> to <code>.env</code>; see the README.
+              GitHub sign-in isn't configured yet. Add <code>GITHUB_CLIENT_ID</code>/<code>GITHUB_CLIENT_SECRET</code> to{" "}
+              <code>.env</code>; see the README.
             </p>
           )}
 

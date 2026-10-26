@@ -3,7 +3,7 @@ import react from "@vitejs/plugin-react";
 
 // The API and the game server share an origin in production. In dev we proxy
 // /api and /auth to the Node server so the session cookie stays first-party and
-// the OAuth redirects (Microsoft, GitHub) work without CORS.
+// the GitHub OAuth redirect works without CORS.
 export default defineConfig({
   plugins: [react()],
   server: {

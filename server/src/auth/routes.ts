@@ -1,10 +1,9 @@
 import { Router, type Request, type Response } from "express";
 import passport from "passport";
-import { Strategy as MicrosoftStrategy } from "passport-microsoft";
 import { Strategy as GitHubStrategy } from "passport-github2";
-import { env, githubConfigured, microsoftConfigured } from "../env.js";
+import { env, githubConfigured } from "../env.js";
 import { authLog } from "../log.js";
-import type { Repository, UserRecord } from "../db/index.js";
+import { IdentityConflictError, type Repository, type UserRecord } from "../db/index.js";
 import { signRealtimeToken, signSessionToken, verifyToken } from "./jwt.js";
 import { iceServersFor } from "./turn.js";
 import { cookieStateStore } from "./oauthState.js";
@@ -35,27 +34,35 @@ export function currentUser(req: Request) {
   return verifyToken(bearer, "session") ?? verifyToken(req.cookies?.[COOKIE], "session");
 }
 
-type ProviderName = "microsoft" | "github";
+type ProviderName = "github";
 
 type DoneFn = (err: Error | null, user?: UserRecord | false, info?: { message: string }) => void;
 
-/** The profile fields we read. Both strategies hand us a superset of this. */
+/** The profile fields we read; passport-github2 hands us a superset of this.
+ *  With `allRawEmails`, every address comes with GitHub's own flags. */
 interface OAuthProfile {
   id: string | number;
   displayName?: string;
   username?: string;
-  /** Microsoft only: the sign-in name, usually the work address. */
-  userPrincipalName?: string;
-  emails?: Array<{ value: string }>;
+  emails?: Array<{ value: string; primary?: boolean; verified?: boolean }>;
   photos?: Array<{ value: string }>;
 }
 
+/** The address to use: the primary one if verified, else any verified one.
+ *  Unverified addresses are never trusted: anyone can add one to a GitHub
+ *  account, including a colleague's (audit SEC-4). */
+function verifiedEmail(profile: OAuthProfile): string | undefined {
+  const verified = (profile.emails ?? []).filter((e) => e.verified === true);
+  return (verified.find((e) => e.primary) ?? verified[0])?.value;
+}
+
 /**
- * Shared identity resolution for every OAuth provider: require an email,
- * enforce the domain allow-list, then upsert.
+ * Identity resolution for a GitHub sign-in: require a verified email, enforce
+ * the optional domain allow-list, then find or create the account.
  *
- * Email is the identity anchor, so the same person signing in with Microsoft and
- * with GitHub on the same address resolves to one account rather than two.
+ * The account is anchored on the GitHub account id, not on the email, so
+ * changing your email on GitHub keeps your account, and an email can't be
+ * used to slip into someone else's account (see Repository.upsertUser).
  */
 async function upsertFromProvider(
   repo: Repository,
@@ -66,11 +73,11 @@ async function upsertFromProvider(
   try {
     const email = input.email?.toLowerCase();
     if (!email) {
-      authLog.warn({ provider }, "sign-in rejected: account exposed no email address");
-      return done(null, false, { message: `${provider} account has no usable email` });
+      authLog.warn({ provider }, "sign-in rejected: no verified email on the account");
+      return done(null, false, { message: `${provider} account has no verified email` });
     }
 
-    // Organisation restriction: only let your own domain in.
+    // Optional organisation restriction, on the verified address only.
     if (env.allowedEmailDomain && !email.endsWith("@" + env.allowedEmailDomain)) {
       authLog.warn({ provider, email }, "sign-in rejected: email domain not allowed");
       return done(null, false, { message: "domain not allowed" });
@@ -86,6 +93,10 @@ async function upsertFromProvider(
     authLog.info({ provider, userId: user.id, email: user.email }, "oauth sign-in");
     return done(null, user);
   } catch (err) {
+    if (err instanceof IdentityConflictError) {
+      authLog.warn({ provider, providerId: input.id }, `sign-in rejected: ${err.message}`);
+      return done(null, false, { message: err.message });
+    }
     return done(err as Error);
   }
 }
@@ -121,54 +132,6 @@ export function createAuthRouter(repo: Repository, options: AuthRouterOptions = 
     });
   }
 
-  // ------------------------------------------------- Microsoft (Entra ID)
-  // Covers Outlook / Microsoft 365 work and school accounts.
-  if (microsoftConfigured()) {
-    // Hoisted rather than inlined: `addUPNAsEmail` is supported by
-    // passport-microsoft at runtime but missing from @types/passport-microsoft,
-    // and TypeScript's excess-property check only fires on fresh object
-    // literals passed directly to a call.
-    const microsoftOptions = {
-      clientID: env.microsoftClientId,
-      clientSecret: env.microsoftClientSecret,
-      callbackURL: env.microsoftCallbackUrl,
-      // Restricting to your tenant here is the real access control:
-      // Microsoft won't issue a token for anyone outside it.
-      tenant: env.microsoftTenant,
-      scope: ["user.read"],
-      // Many Entra accounts leave Graph's `mail` field empty while their
-      // userPrincipalName IS the work address. Without this, sign-in fails
-      // for those users with a confusing "no email" error.
-      addUPNAsEmail: true,
-      // state + PKCE (S256) in a signed cookie (oauthState.ts): no login CSRF.
-      // A custom store turns state handling on by itself.
-      pkce: true,
-      store: cookieStateStore("microsoft"),
-    };
-
-    passport.use(
-      new MicrosoftStrategy(
-        microsoftOptions,
-        (_accessToken: string, _refreshToken: string, profile: OAuthProfile, done: DoneFn) => {
-          void upsertFromProvider(
-            repo,
-            "microsoft",
-            {
-              id: String(profile.id),
-              email: profile.emails?.[0]?.value ?? profile.userPrincipalName,
-              name: profile.displayName,
-              picture: undefined, // Graph serves photos as binary, not a URL
-            },
-            done,
-          );
-        },
-      ),
-    );
-    mountProvider("microsoft", ["user.read"]);
-  } else {
-    mountUnconfigured("microsoft", "MICROSOFT_CLIENT_ID and MICROSOFT_CLIENT_SECRET");
-  }
-
   // ---------------------------------------------------------------- GitHub
   if (githubConfigured()) {
     passport.use(
@@ -180,6 +143,8 @@ export function createAuthRouter(repo: Repository, options: AuthRouterOptions = 
           // Without this scope GitHub returns no email at all for accounts that
           // keep it private, and sign-in would fail for them.
           scope: ["user:email"],
+          // Every address with its `verified` flag, not just the primary one.
+          allRawEmails: true,
           // state + PKCE (S256) in a signed cookie (oauthState.ts): no login CSRF.
           // A custom store turns state handling on by itself.
           pkce: true,
@@ -193,9 +158,7 @@ export function createAuthRouter(repo: Repository, options: AuthRouterOptions = 
             "github",
             {
               id: String(profile.id),
-              // passport-github2 fills `emails` from /user/emails when the
-              // user:email scope is granted; it prefers the primary address.
-              email: profile.emails?.[0]?.value,
+              email: verifiedEmail(profile),
               name: profile.displayName || profile.username,
               picture: profile.photos?.[0]?.value,
             },
@@ -294,7 +257,6 @@ export function createAuthRouter(repo: Repository, options: AuthRouterOptions = 
    *  here: those come from /api/ice after sign-in. */
   router.get("/api/config", async (_req, res) => {
     res.json({
-      microsoftEnabled: microsoftConfigured(),
       githubEnabled: githubConfigured(),
       devAuthEnabled: env.devAuth,
       spaces: await repo.listSpaces(),

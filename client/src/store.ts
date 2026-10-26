@@ -28,7 +28,6 @@ export interface Me {
 }
 
 export interface AppConfig {
-  microsoftEnabled: boolean;
   githubEnabled: boolean;
   devAuthEnabled: boolean;
   spaces: Array<{ slug: string; name: string }>;

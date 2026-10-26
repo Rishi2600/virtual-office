@@ -56,32 +56,14 @@ export const env = {
    *  handshake and are useless if they leak from a log a minute later. */
   realtimeTtlSec: int("REALTIME_TTL_SEC", 120),
 
-  /** Microsoft Entra ID (formerly Azure AD) — covers Outlook / Microsoft 365
-   *  work and school accounts. */
-  microsoftClientId: process.env.MICROSOFT_CLIENT_ID ?? "",
-  microsoftClientSecret: process.env.MICROSOFT_CLIENT_SECRET ?? "",
-  microsoftCallbackUrl: str(
-    process.env.MICROSOFT_CALLBACK_URL,
-    "http://localhost:5173/auth/microsoft/callback",
-  ),
-  /**
-   * Your Entra directory (tenant) ID. This is the real access control: Microsoft
-   * will not issue a token for anyone outside the tenant, which is far stronger
-   * than matching an email suffix after the fact.
-   *
-   * "common"        - any Microsoft account, personal included (testing only)
-   * "organizations" - any work/school account, any tenant
-   * "<tenant-guid>" - only your organisation   <- use this in production
-   */
-  microsoftTenant: str(process.env.MICROSOFT_TENANT_ID, "common"),
-
+  /** GitHub is the only sign-in provider (owner decision, 2026-10-26). */
   githubClientId: process.env.GITHUB_CLIENT_ID ?? "",
   githubClientSecret: process.env.GITHUB_CLIENT_SECRET ?? "",
   githubCallbackUrl: str(process.env.GITHUB_CALLBACK_URL, "http://localhost:5173/auth/github/callback"),
 
-  /** Restrict sign-in to your organisation's email domain, e.g. "acme.com".
-   *  Applies to EVERY provider — see the README note about GitHub accounts
-   *  whose primary email is a personal one. */
+  /** Optional: only people with a VERIFIED GitHub email in this domain may
+   *  sign in, e.g. "acme.com". Unset = anyone with a GitHub account (the
+   *  owner's choice while developing; a warning is logged in production). */
   allowedEmailDomain: process.env.ALLOWED_EMAIL_DOMAIN ?? "",
 
   /** Dev sign-in: on by default in development, impossible anywhere else. */
@@ -138,21 +120,14 @@ export function assertSafeConfig(): void {
         `JWT_SECRET must be at least ${MIN_JWT_SECRET_LENGTH} characters (generate one with: openssl rand -base64 48)`,
       );
     }
-    // At least one real identity provider must be configured, otherwise a
-    // production deploy would have no way for anyone to sign in at all.
-    if (!microsoftConfigured() && !githubConfigured()) {
-      found.push(
-        "configure at least one sign-in provider: MICROSOFT_CLIENT_ID/MICROSOFT_CLIENT_SECRET or GITHUB_CLIENT_ID/GITHUB_CLIENT_SECRET",
-      );
+    // GitHub is the only way in, so a production deploy without it would have
+    // no way for anyone to sign in at all.
+    if (!githubConfigured()) {
+      found.push("configure GitHub sign-in: GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET");
     }
     if (env.turnSecret && env.turnSecret.length < MIN_JWT_SECRET_LENGTH) {
       found.push(
         `TURN_SECRET must be at least ${MIN_JWT_SECRET_LENGTH} characters (generate one with: openssl rand -hex 32)`,
-      );
-    }
-    if (microsoftConfigured() && env.microsoftTenant === "common") {
-      found.push(
-        'MICROSOFT_TENANT_ID must be your tenant GUID in production; "common" lets any Microsoft account sign in',
       );
     }
   }
@@ -163,6 +138,4 @@ export function assertSafeConfig(): void {
   }
 }
 
-export const microsoftConfigured = () =>
-  Boolean(env.microsoftClientId && env.microsoftClientSecret);
 export const githubConfigured = () => Boolean(env.githubClientId && env.githubClientSecret);
