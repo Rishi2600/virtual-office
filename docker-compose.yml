@@ -40,6 +40,10 @@ services:
       GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
       GITHUB_CALLBACK_URL: ${GITHUB_CALLBACK_URL:-http://localhost:2567/auth/github/callback}
       ALLOWED_EMAIL_DOMAIN: ${ALLOWED_EMAIL_DOMAIN:-}
+      # The address people open; only pages from here may use the office.
+      PUBLIC_URL: ${PUBLIC_URL:-}
+      # The TLS proxy on this host is in front of the app.
+      TRUST_PROXY: ${TRUST_PROXY:-1}
       # NAT traversal. STUN finds people's public addresses; TURN relays calls
       # for people whose network blocks direct connections. The app signs
       # short-lived TURN credentials with TURN_SECRET, which coturn shares.

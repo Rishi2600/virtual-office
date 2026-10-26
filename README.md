@@ -146,6 +146,7 @@ Both are enforced server-side, so a patched client can't force its way into eith
 | `npm test` | Server test suites (see below): end-to-end with real clients, sessions, sign-in attacks, startup guards, shutdown, restart |
 | `npm run smoke` | Colyseus client/server compatibility check — run before upgrading any Colyseus package |
 | `npm run lint` | ESLint over every workspace (no warnings allowed) |
+| `npm run audit` | Dependency audit: fails on any high/critical advisory not explicitly accepted (with its reason) in `scripts/audit.mjs`; CI runs it on every push |
 | `npm run test:postgres` | Postgres repository + migrations against `TEST_DATABASE_URL` (it drops its tables; refuses a database whose name lacks `test`) |
 | `npm run db:up` / `db:down` / `db:reset` / `db:psql` | Local dev Postgres in Docker (`docker-compose.dev.yml`): start, stop, wipe, SQL shell |
 | `npm run turn:up` / `turn:down` | Local TURN relay (coturn) in Docker, for testing relayed calls |
@@ -324,7 +325,19 @@ docker compose up -d --build
 `docker-compose.yml` runs the app plus PostgreSQL and refuses to start without `JWT_SECRET` and
 `POSTGRES_PASSWORD`. The app serves the built client and the game server from one origin, published
 on **`127.0.0.1:2567` only**: run nginx or Caddy on the same host for TLS and proxy to it
-(including WebSocket upgrades).
+(including WebSocket upgrades). Behind that proxy, set:
+
+```ini
+PUBLIC_URL=https://office.example.com   # the address people open (defaults to GITHUB_CALLBACK_URL's)
+TRUST_PROXY=1                           # one proxy in front: take the real client IP from it
+```
+
+**Browser-facing security.** Every response carries a strict Content-Security-Policy (only this
+site's own scripts, styles, fonts and connections; no framing; no plugins), HSTS, `nosniff`, no
+referrer, and a Permissions-Policy that keeps camera, microphone and screen capture to this site;
+there's no `X-Powered-By`. Only pages from `PUBLIC_URL` may use the office: the matchmaker answers
+CORS for that origin only, the WebSocket refuses other origins, and the room checks again. A seat is
+only reserved after the sign-in token is checked, so nobody can fill the office without signing in.
 
 The image is built from an allowlist (`.dockerignore`), so your `.env`, local data and git history
 never go into it; secrets reach the container only as environment variables at runtime. It runs as
